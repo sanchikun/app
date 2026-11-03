@@ -31,27 +31,33 @@ interface IntervalProps {
   program: Program;
   selected: number;
   onSelect(i: number): void;
-  onDuration(i: number, sec: number): void;
   onToggleKind(i: number): void;
+  /** 合計時間を1段階増減（配分の割合は保つ） */
+  onTotal(direction: 1 | -1): void;
+  /** 繰り返し回数を変える（合計は保ち、1サイクルが短く/長くなる） */
   onRounds(n: number): void;
+  /** 選択中の区間の真ん中に反対の区間（ワークなら休憩）を入れる */
+  onInsert(): void;
+  canInsert: boolean;
+  onRemove(): void;
   onOpenDetail(): void;
-  /** 1周の範囲の表示名（「1回ごと」「全体」など） */
-  lapName: string;
-  onCycleLap(): void;
 }
 
 export function IntervalEditBar({
   program,
   selected,
   onSelect,
-  onDuration,
   onToggleKind,
+  onTotal,
   onRounds,
+  onInsert,
+  canInsert,
+  onRemove,
   onOpenDetail,
-  lapName,
-  onCycleLap,
 }: IntervalProps) {
   const step = program.steps[selected];
+  const totalSec = program.steps.reduce((a, s) => a + s.durationSec, 0) * program.rounds;
+  const insertLabel = step?.kind === 'rest' ? '＋ワーク' : '＋休憩';
   return (
     <div className="edit-bar">
       <div className="edit-row">
@@ -70,9 +76,17 @@ export function IntervalEditBar({
             </button>
           ))}
         </div>
-        <button className="lap-chip" onClick={onCycleLap} aria-label={`1周の範囲: ${lapName}（タップで切り替え）`} title="1周の範囲を切り替え">
-          <span className="lap-chip-head">1周</span>
-          {lapName}
+        <button className="btn small-action" onClick={onInsert} disabled={!canInsert} title={`選択中の区間の途中に${insertLabel.slice(1)}を入れる`}>
+          {insertLabel}
+        </button>
+        <button
+          className="icon danger"
+          onClick={onRemove}
+          disabled={program.steps.length <= 1}
+          aria-label={`${step?.label ?? '区間'}を削除`}
+          title="選択中の区間を削除（時間は隣の区間へ）"
+        >
+          🗑
         </button>
         <button className="icon" onClick={onOpenDetail} aria-label="インターバルの詳細設定">
           ⋯
@@ -80,31 +94,20 @@ export function IntervalEditBar({
       </div>
       <div className="edit-row">
         <div className="group">
-          <button
-            className="icon"
-            onClick={() => step && onDuration(selected, nudge(step.durationSec, -1, 5))}
-            disabled={!step || step.durationSec <= 5}
-            aria-label={`${step?.label}を短くする`}
-          >
+          <button className="icon" onClick={() => onTotal(-1)} aria-label="合計を短くする">
             −
           </button>
-          <span className="group-label" style={{ color: kindColor(step?.kind) }}>
-            {step?.label}
-          </span>
-          <button
-            className="icon"
-            onClick={() => step && onDuration(selected, nudge(step.durationSec, 1, 5))}
-            aria-label={`${step?.label}を長くする`}
-          >
+          <span className="group-label">合計 {formatClock(totalSec * 1000)}</span>
+          <button className="icon" onClick={() => onTotal(1)} aria-label="合計を長くする">
             ＋
           </button>
         </div>
-        <div className="group">
-          <button className="icon" onClick={() => onRounds(Math.max(1, program.rounds - 1))} disabled={program.rounds <= 1} aria-label="回数を減らす">
+        <div className="group narrow">
+          <button className="icon" onClick={() => onRounds(Math.max(1, program.rounds - 1))} disabled={program.rounds <= 1} aria-label="繰り返しを減らす">
             −
           </button>
-          <span className="group-label">×{program.rounds}回</span>
-          <button className="icon" onClick={() => onRounds(Math.min(99, program.rounds + 1))} aria-label="回数を増やす">
+          <span className="group-label">×{program.rounds}</span>
+          <button className="icon" onClick={() => onRounds(Math.min(20, program.rounds + 1))} aria-label="繰り返しを増やす">
             ＋
           </button>
         </div>

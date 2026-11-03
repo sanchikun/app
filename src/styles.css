@@ -279,6 +279,19 @@ button:disabled {
   border-radius: 10px;
 }
 
+.group.narrow {
+  flex: 0 0 auto;
+  min-width: 128px;
+}
+
+.btn.small-action {
+  flex: none;
+  height: 40px;
+  padding: 0 10px;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
 .group-label {
   font-size: 14px;
   font-weight: 700;
@@ -311,27 +324,6 @@ button:disabled {
 
 .separator.round-edge {
   stroke-width: 5;
-}
-
-.lap-chip {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 40px;
-  padding: 0 12px;
-  border-radius: 12px;
-  border: 1px solid var(--line);
-  background: var(--surface);
-  font-size: 13px;
-  font-weight: 700;
-  white-space: nowrap;
-}
-
-.lap-chip-head {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text-dim);
 }
 
 .handle-dot {

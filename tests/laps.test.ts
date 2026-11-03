@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildLaps, lapLabel, lapOf, nextLapUnit, normalizeLap, roundsPerLap } from '../src/core/laps';
+import { buildLaps, lapOf } from '../src/core/laps';
 import { buildSegments, intervalProgram } from '../src/core/program';
 
 // ワーク1分 → 休憩30秒 ×3（既定: 最後の休憩も含む）+ 準備5秒
@@ -32,25 +32,5 @@ describe('buildLaps', () => {
     const laps = buildLaps(segs, 1);
     expect(lapOf(laps, 0)?.index).toBe(0);
     expect(lapOf(laps, 3)?.index).toBe(2);
-  });
-});
-
-describe('lap helpers', () => {
-  it('表示名と切り替え（1回ごと ⇔ 全体）', () => {
-    expect(lapLabel('all', 5)).toBe('全体');
-    expect(lapLabel(1, 5)).toBe('1回ごと');
-    expect(lapLabel(5, 5)).toBe('全体');
-    expect(nextLapUnit(1, 5)).toBe('all');
-    expect(nextLapUnit(2, 5)).toBe('all');
-    expect(nextLapUnit('all', 5)).toBe(1);
-    expect(roundsPerLap(10, 3)).toBe(3);
-  });
-
-  it('以前の「区間ごと」や不正な値は既定（1回ごと）に戻す', () => {
-    expect(normalizeLap('segment')).toBe(1);
-    expect(normalizeLap(undefined)).toBe(1);
-    expect(normalizeLap(0)).toBe(1);
-    expect(normalizeLap('all')).toBe('all');
-    expect(normalizeLap(3)).toBe(3);
   });
 });

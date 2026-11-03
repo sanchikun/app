@@ -2,8 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Cue } from './core/announcer';
 import type { TimerSnapshot } from './core/engine';
 import { cueToSpeech, formatClock, speakDuration, statusSpeech } from './core/format';
-import { lapLabel, nextLapUnit, roundsPerLap } from './core/laps';
-import { intervalProgram, isSimple, newId, programLap, simpleProgram, type Program } from './core/program';
+import { insertInto, nudgeTotal, removeAt, scaleDurations, unitFor } from './core/split';
+import { intervalProgram, isSimple, newId, simpleProgram, type Program } from './core/program';
 import { parseVoiceCommand, VOICE_HELP_TEXT, type VoiceCommand } from './core/voiceCommands';
 import { Controls } from './components/Controls';
 import { BarEditor, BarView } from './components/Bar';
@@ -39,6 +39,8 @@ const programFor = (e: EditorState): Program => (e.mode === 'simple' ? simplePro
 
 const clonePreset = (p: Program): Program => ({
   ...p,
+  // 合計 = 1サイクル × 回数 で考えるので、最後の休憩は常に残す
+  skipLastRest: false,
   id: newId('prog'),
   steps: p.steps.map((s) => ({ ...s, id: newId('step') })),
 });
@@ -102,8 +104,32 @@ export function App() {
   );
 
   const updateInterval = (fn: (p: Program) => Program) => updateEditor((e) => ({ ...e, interval: fn(e.interval) }));
-  const setStepDuration = (i: number, sec: number) =>
-    updateInterval((p) => ({ ...p, steps: p.steps.map((s, j) => (j === i ? { ...s, durationSec: sec } : s)) }));
+  const setDurations = (durs: number[]) =>
+    updateInterval((p) => ({ ...p, steps: p.steps.map((s, j) => ({ ...s, durationSec: durs[j] ?? s.durationSec })) }));
+  /** 1サイクルの長さを変える（配分の割合は保つ） */
+  const resizeCycle = (p: Program, cycleSec: number): Program['steps'] => {
+    const unit = unitFor(cycleSec);
+    const durs = scaleDurations(p.steps.map((s) => s.durationSec), cycleSec, unit);
+    return p.steps.map((s, i) => ({ ...s, durationSec: durs[i] }));
+  };
+  const cycleOf = (p: Program) => p.steps.reduce((a, s) => a + s.durationSec, 0);
+  const changeTotal = (dir: 1 | -1) =>
+    updateInterval((p) => {
+      const next = nudgeTotal(cycleOf(p) * p.rounds, p.rounds, dir, p.steps.length * 5);
+      return { ...p, steps: resizeCycle(p, next / p.rounds) };
+    });
+  const changeRounds = (n: number) =>
+    updateInterval((p) => ({ ...p, rounds: n, steps: resizeCycle(p, (cycleOf(p) * p.rounds) / n) }));
+  const insertStep = () =>
+    updateEditor((e) => {
+      const r = insertInto(e.interval.steps, e.selected, unitFor(cycleOf(e.interval)));
+      return r ? { ...e, interval: { ...e.interval, steps: r.steps }, selected: r.inserted } : e;
+    });
+  const removeStep = () =>
+    updateEditor((e) => {
+      const r = removeAt(e.interval.steps, e.selected);
+      return r ? { ...e, interval: { ...e.interval, steps: r.steps }, selected: r.selected } : e;
+    });
 
   const applyPreset = (p: Program) => {
     if (isSimple(p)) {
@@ -352,21 +378,14 @@ export function App() {
             steps={program.steps}
             selected={editor.selected}
             rounds={program.rounds}
-            lapRounds={roundsPerLap(programLap(program), program.rounds)}
-            lapName={lapLabel(programLap(program), program.rounds)}
-            skipLastRest={program.skipLastRest}
-            programTotalSec={Math.round(snap.totalMs / 1000)}
             onSelect={(i) => updateEditor((e) => ({ ...e, selected: i }))}
-            onChange={(i, sec) =>
-              editorRef.current.mode === 'simple'
-                ? updateEditor((e) => ({ ...e, simpleSec: sec }))
-                : setStepDuration(i, sec)
-            }
+            onChange={(_, sec) => updateEditor((e) => ({ ...e, simpleSec: sec }))}
+            onDurations={setDurations}
             onCenterTap={toggleTimer}
             onDetent={() => sound.vibrate([4])}
           />
         ) : (
-          <Running snap={snap} lap={programLap(program)} onTap={toggleTimer} />
+          <Running snap={snap} lap="all" onTap={toggleTimer} />
         )}
       </div>
 
@@ -380,7 +399,6 @@ export function App() {
                 program={editor.interval}
                 selected={editor.selected}
                 onSelect={(i) => updateEditor((e) => ({ ...e, selected: i }))}
-                onDuration={setStepDuration}
                 onToggleKind={(i) =>
                   updateInterval((p) => ({
                     ...p,
@@ -394,10 +412,12 @@ export function App() {
                     }),
                   }))
                 }
-                onRounds={(n) => updateInterval((p) => ({ ...p, rounds: n }))}
+                onTotal={changeTotal}
+                onRounds={changeRounds}
+                onInsert={insertStep}
+                canInsert={(editor.interval.steps[editor.selected]?.durationSec ?? 0) >= unitFor(cycleOf(editor.interval)) * 3}
+                onRemove={removeStep}
                 onOpenDetail={() => setSheet('interval')}
-                lapName={lapLabel(programLap(editor.interval), editor.interval.rounds)}
-                onCycleLap={() => updateInterval((p) => ({ ...p, lap: nextLapUnit(programLap(p), p.rounds) }))}
               />
             )
           ) : (

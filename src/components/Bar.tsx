@@ -97,7 +97,7 @@ export function BarView({ snap, lap: lapUnit, onTap }: RunningViewProps) {
 /**
  * 設定用のバー。左右にドラッグして時間を決める。
  * - タイマー: バーをなぞる／つまみを動かすと時間が決まる。全幅の長さは自動（下に目盛り）
- * - インターバル: 全幅＝「Nラウンド」。1ラウンド目の各区間の右端のつまみを動かすと全ラウンドに反映
+ * - インターバル: 全幅＝プログラム全体。区間の境目のつまみを動かすと、合計はそのままで配分（割合）が変わる
  */
 export function BarEditor(props: TimeEditorProps) {
   const barRef = useRef<HTMLDivElement>(null);
@@ -108,20 +108,18 @@ export function BarEditor(props: TimeEditorProps) {
     const zone = y >= -28 && y <= rect.height + 28 ? 'track' : 'center';
     return { x, y, zone, frac: x / rect.width } as const;
   };
-  const { exact, wedges, scale, lapSec, dragging, sel, handlers } = useTimeEditor(props, {
+  const { simple, wedges, handles, scale, dragging, sel, handlers } = useTimeEditor(props, {
     wraps: false,
     handleHit: 0.06,
     toPoint,
   });
-  const { mode, selected, rounds, lapRounds, lapName, programTotalSec } = props;
+  const { mode, selected, steps, rounds } = props;
+  const summary = { mode, steps, sel, rounds };
 
   return (
     <div className={`bar-view editor ${dragging ? 'dragging' : ''}`} {...handlers}>
       <div className="bar-head">
-        <EditorSummary
-          {...{ mode, sel, selColor: kindColor(sel?.kind), rounds, lapRounds, lapName, programTotalSec, lapSec }}
-          part="head"
-        />
+        <EditorSummary {...summary} part="head" />
       </div>
       <div
         className="bar"
@@ -139,8 +137,7 @@ export function BarEditor(props: TimeEditorProps) {
             const from = w.startSec / scale;
             const to = Math.min(1, (w.startSec + w.durationSec) / scale);
             if (to <= from) return null;
-            const isSel = mode === 'simple' || w.stepIndex === selected;
-            const step = props.steps[w.stepIndex];
+            const isSel = simple || w.stepIndex === selected;
             return (
               <Block
                 key={i}
@@ -149,26 +146,20 @@ export function BarEditor(props: TimeEditorProps) {
                 kind={w.kind}
                 opacity={(isSel ? 1 : 0.45) * (w.round === 1 ? 1 : 0.7)}
                 roundEdge={i > 0 && w.stepIndex === 0}
-                label={mode === 'interval' ? step?.label : undefined}
+                label={simple ? undefined : steps[w.stepIndex]?.label}
               />
             );
           })}
         </div>
-        {/* つまみ（1ラウンド目の各区間の右端） */}
-        {wedges.map((w, i) => {
-          if (w.round !== 1) return null;
-          const end = Math.min(1, (w.startSec + w.durationSec) / scale);
-          const active = mode === 'simple' || w.stepIndex === selected;
-          return (
-            <div
-              key={`h${i}`}
-              className={`bar-handle ${active ? 'active' : ''}`}
-              style={{ left: pct(end), borderColor: kindColor(w.kind) }}
-            />
-          );
-        })}
+        {handles.filter((h) => h.visible).map((h) => (
+          <div
+            key={h.key}
+            className={`bar-handle ${h.active ? 'active' : ''}`}
+            style={{ left: pct(h.frac), borderColor: kindColor(h.kind) }}
+          />
+        ))}
       </div>
-      {!exact && (
+      {simple && (
         <div className="bar-scale" aria-hidden>
           {[0, 0.25, 0.5, 0.75, 1].map((f) => (
             <span key={f} style={{ left: pct(f) }}>
@@ -178,10 +169,7 @@ export function BarEditor(props: TimeEditorProps) {
         </div>
       )}
       <div className="bar-foot">
-        <EditorSummary
-          {...{ mode, sel, selColor: kindColor(sel?.kind), rounds, lapRounds, lapName, programTotalSec, lapSec }}
-          part="foot"
-        />
+        <EditorSummary {...summary} part="foot" />
       </div>
     </div>
   );

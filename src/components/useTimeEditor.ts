@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { expandScale, fitScale, MAX_TOTAL_SEC, snap, snapFor, unwrapDelta } from '../core/dialScale';
 import type { StepKind } from '../core/program';
+import { resizePair, unitFor } from '../core/split';
 
 export interface EditorStep {
   label: string;
@@ -11,18 +12,16 @@ export interface EditorStep {
 /** リング版・バー版の設定エディタで共通のプロパティ */
 export interface TimeEditorProps {
   mode: 'simple' | 'interval';
+  /** 1サイクル分の区間 */
   steps: EditorStep[];
   selected: number;
+  /** 繰り返し回数（インターバル時。全体 = 1サイクル × rounds） */
   rounds: number;
-  /** 1周（バーなら全幅）に含めるラウンド数（インターバル時） */
-  lapRounds: number;
-  /** 1周の範囲の表示名（「1回ごと」「全体」など） */
-  lapName: string;
-  skipLastRest: boolean;
-  /** 準備時間を含むプログラム全体の合計（表示用） */
-  programTotalSec: number;
   onSelect(index: number): void;
+  /** タイマー: 時間を変える */
   onChange(index: number, durationSec: number): void;
+  /** インターバル: 境目を動かして配分を変える（合計は同じ） */
+  onDurations(durations: number[]): void;
   onCenterTap(): void;
   onDetent?(): void;
 }
@@ -33,6 +32,21 @@ export interface Wedge {
   kind: StepKind;
   startSec: number;
   durationSec: number;
+}
+
+/** つまみ。インターバルでは区間の境目、タイマーでは終わりの位置 */
+export interface Handle {
+  key: string;
+  /** 位置（全体=1） */
+  frac: number;
+  /** つまみの縁の色に使う区間の種類（境目の左側） */
+  kind: StepKind;
+  active: boolean;
+  /** 境目の左右の区間（1サイクル内の index）。左 a を伸ばすと右 b が縮む */
+  a: number;
+  b: number;
+  /** 画面に描くか（1サイクル目だけ描き、他のサイクルの境目は見えないつかみ所にする） */
+  visible: boolean;
 }
 
 /**
@@ -50,27 +64,23 @@ export interface EditorPoint {
 interface Options {
   /** リングのように端と端がつながっているか（12時をまたぐドラッグを連続とみなす） */
   wraps: boolean;
-  /** ハンドルをつかんだとみなす距離（frac 単位） */
+  /** つまみをつかんだとみなす距離（frac 単位） */
   handleHit: number;
   toPoint(e: ReactPointerEvent): EditorPoint;
 }
 
 type Drag =
-  | { type: 'handle'; index: number; raw: number; last: number }
+  | { type: 'end'; raw: number; last: number }
+  | { type: 'boundary'; a: number; b: number; raw: number; last: number }
   | { type: 'center'; x: number; y: number; moved: boolean }
   | null;
 
-/** 1周ぶんの区間を並べる（Nラウンドぶん。最後のラウンドの休憩省略も反映） */
-export function buildWedges(steps: EditorStep[], lapRounds: number, totalRounds: number, skipLastRest: boolean): Wedge[] {
-  const n = Math.max(1, lapRounds);
-  const includesLast = n >= totalRounds;
-  let lastNonRest = steps.length - 1;
-  if (includesLast && skipLastRest) while (lastNonRest > 0 && steps[lastNonRest].kind === 'rest') lastNonRest -= 1;
+/** 全体（rounds サイクル分）の区間を並べる */
+export function buildWedges(steps: EditorStep[], rounds: number): Wedge[] {
   const wedges: Wedge[] = [];
   let t = 0;
-  for (let r = 1; r <= n; r += 1) {
+  for (let r = 1; r <= Math.max(1, rounds); r += 1) {
     steps.forEach((s, i) => {
-      if (includesLast && skipLastRest && r === n && i > lastNonRest) return;
       wedges.push({ stepIndex: i, round: r, kind: s.kind, startSec: t, durationSec: s.durationSec });
       t += s.durationSec;
     });
@@ -80,22 +90,20 @@ export function buildWedges(steps: EditorStep[], lapRounds: number, totalRounds:
 
 /**
  * 設定エディタの状態とドラッグ操作。
- * - タイマー: 目盛り付き（1周/全幅の長さは設定時間に合わせて自動）。タッチした位置の時間になる
- * - インターバル: 「Nラウンド」がちょうど1周/全幅。1ラウンド目の各区間の終わりのハンドルで長さを変えると全ラウンドに反映
+ * - タイマー: 目盛り付き（全体の長さは設定時間に合わせて自動）。タッチした位置の時間になる
+ * - インターバル: 円/バー全体＝プログラム全体。1サイクル目の区間の境目にあるつまみを動かすと、
+ *   合計はそのままでワーク・休憩の配分（割合）が変わり、全サイクルに反映される
  */
 export function useTimeEditor(props: TimeEditorProps, opts: Options) {
-  const { mode, steps, rounds, lapRounds, skipLastRest, onSelect, onChange, onCenterTap, onDetent } = props;
-  const exact = mode === 'interval';
-  const minScale = mode === 'simple' ? 300 : 60;
-  const roundSec = steps.reduce((a, s) => a + s.durationSec, 0);
-  const wedges = mode === 'simple' ? buildWedges(steps, 1, 1, false) : buildWedges(steps, lapRounds, rounds, skipLastRest);
-  const lapSec = wedges.reduce((a, w) => a + w.durationSec, 0);
+  const { mode, steps, rounds, selected, onSelect, onChange, onDurations, onCenterTap, onDetent } = props;
+  const simple = mode === 'simple';
+  const cycleSec = steps.reduce((a, s) => a + s.durationSec, 0);
+  const wedges = simple ? buildWedges(steps, 1) : buildWedges(steps, rounds);
+  const totalSec = wedges.reduce((a, w) => a + w.durationSec, 0);
 
-  const [autoScale, setAutoScale] = useState(() => fitScale(roundSec, minScale));
-  const [frozen, setFrozen] = useState<number | null>(null);
-  const dragging = frozen !== null;
-  // ぴったり表示ではドラッグ中は目盛りを固定（ハンドルが指からずれないように）。離すと合わせ直す
-  const scale = exact ? (frozen ?? Math.max(lapSec, 1)) : autoScale;
+  const [autoScale, setAutoScale] = useState(() => fitScale(cycleSec, 300));
+  const [dragging, setDragging] = useState(false);
+  const scale = simple ? autoScale : Math.max(totalSec, 1);
 
   const dragRef = useRef<Drag>(null);
   const scaleRef = useRef(scale);
@@ -103,37 +111,54 @@ export function useTimeEditor(props: TimeEditorProps, opts: Options) {
   const stepsRef = useRef(steps);
   stepsRef.current = steps;
 
-  // ドラッグしていないときは合計時間に合わせて目盛りを合わせ直す
+  // タイマー: ドラッグしていないときは設定時間に合わせて目盛りを合わせ直す
   useEffect(() => {
-    if (!dragging) setAutoScale(fitScale(roundSec, minScale));
-  }, [roundSec, dragging, minScale]);
+    if (simple && !dragging) setAutoScale(fitScale(cycleSec, 300));
+  }, [simple, cycleSec, dragging]);
 
-  // スナップ幅は「1ラウンドを目盛りで表示したとき」と同じ細かさにする
-  const snapStep = snapFor(exact ? fitScale(roundSec, 60) : scale);
   const dist = (a: number, b: number) => (opts.wraps ? Math.abs(unwrapDelta(a, b)) : Math.abs(a - b));
+  const durations = () => stepsRef.current.map((s) => s.durationSec);
 
-  const minFor = () => (mode === 'simple' ? 0 : 5);
-  const maxFor = (index: number) => {
-    const others = stepsRef.current.reduce((a, s, i) => (i === index ? a : a + s.durationSec), 0);
-    return Math.max(minFor(), MAX_TOTAL_SEC - others);
-  };
+  // つまみ: 各サイクル内の区間の境目。どのサイクルの境目をつかんでも同じ配分が変わる
+  // （サイクルの切れ目は「1サイクルの長さ × 回数」で位置が決まっているので動かせない）
+  const handles: Handle[] = simple
+    ? [{ key: 'end', frac: Math.min(1, cycleSec / scale), kind: steps[0]?.kind ?? 'work', active: true, a: 0, b: 0, visible: true }]
+    : wedges
+        .filter((w) => w.stepIndex > 0)
+        .map((w) => {
+          const a = w.stepIndex - 1;
+          const b = w.stepIndex;
+          // 描くのは1サイクル目だけ。他のサイクルの境目は見えないつかみ所
+          const visible = w.round === 1;
+          return {
+            key: `b${w.round}-${w.stepIndex}`,
+            frac: w.startSec / scale,
+            kind: steps[a].kind,
+            active: visible && (a === selected || b === selected),
+            a,
+            b,
+            visible,
+          };
+        });
 
-  const apply = (index: number, raw: number) => {
-    const value = Math.min(maxFor(index), Math.max(minFor(), snap(raw, snapStep)));
-    const cur = stepsRef.current[index]?.durationSec;
-    if (value === cur) return;
-    onChange(index, value);
+  // ---- タイマー（終わりの位置を決める） ----
+  const applyEnd = (raw: number) => {
+    const sc = scaleRef.current;
+    const value = Math.min(MAX_TOTAL_SEC, Math.max(0, snap(raw, snapFor(sc))));
+    if (value === stepsRef.current[0]?.durationSec) return;
+    onChange(0, value);
     onDetent?.();
-    if (!exact) {
-      const total = stepsRef.current.reduce((a, s, i) => a + (i === index ? value : s.durationSec), 0);
-      const next = expandScale(scaleRef.current, total);
-      if (next !== scaleRef.current) setAutoScale(next);
-    }
+    const next = expandScale(sc, value);
+    if (next !== sc) setAutoScale(next);
   };
 
-  const startHandleDrag = (index: number, raw: number, at: number) => {
-    dragRef.current = { type: 'handle', index, raw, last: at };
-    setFrozen(scaleRef.current);
+  // ---- インターバル（境目を動かす: 左の区間 a の長さを raw にし、右の区間 b で調整） ----
+  const applyBoundary = (a: number, b: number, raw: number) => {
+    const cur = durations();
+    const next = resizePair(cur, a, b, raw, unitFor(cur.reduce((x, y) => x + y, 0)));
+    if (next === cur) return;
+    onDurations(next);
+    onDetent?.();
   };
 
   const onPointerDown = (e: ReactPointerEvent<Element>) => {
@@ -146,34 +171,38 @@ export function useTimeEditor(props: TimeEditorProps, opts: Options) {
     e.currentTarget.setPointerCapture(e.pointerId);
     const sc = scaleRef.current;
 
-    // 一番近いハンドル（1ラウンド目のみ編集できる）
-    let nearest: Wedge | null = null;
+    if (simple) {
+      // つまみ付近なら今の値から、それ以外はタッチした位置の値にする
+      const near = dist(p.frac, handles[0].frac) < opts.handleHit;
+      const raw = near ? steps[0].durationSec : p.frac * sc;
+      dragRef.current = { type: 'end', raw, last: p.frac };
+      setDragging(true);
+      applyEnd(raw);
+      return;
+    }
+
+    // 一番近い境目のつまみ
+    let nearest = -1;
     let nearestDist = Infinity;
-    for (const w of wedges) {
-      if (w.round !== 1) continue;
-      const d = dist(p.frac, Math.min(1, (w.startSec + w.durationSec) / sc));
+    handles.forEach((h, i) => {
+      const d = dist(p.frac, h.frac);
       if (d < nearestDist) {
         nearestDist = d;
-        nearest = w;
+        nearest = i;
       }
-    }
-
-    if (mode === 'simple') {
-      // ハンドル付近なら今の値から、それ以外はタッチした位置の値にする
-      const raw = nearestDist < opts.handleHit ? steps[0].durationSec : p.frac * sc;
-      startHandleDrag(0, raw, p.frac);
-      apply(0, raw);
+    });
+    if (nearest >= 0 && nearestDist < opts.handleHit) {
+      const h = handles[nearest];
+      // 境目の左右どちらかの区間を選択状態に（今選んでいる方を優先）
+      if (selected !== h.a && selected !== h.b) onSelect(h.a);
+      dragRef.current = { type: 'boundary', a: h.a, b: h.b, raw: steps[h.a].durationSec, last: p.frac };
+      setDragging(true);
       return;
     }
-
-    if (nearest && nearestDist < opts.handleHit) {
-      onSelect(nearest.stepIndex);
-      startHandleDrag(nearest.stepIndex, steps[nearest.stepIndex].durationSec, p.frac);
-      return;
-    }
-    const posSec = p.frac * sc;
+    // それ以外はタップした区間を選択
+    const posSec = (((p.frac % 1) + 1) % 1) * sc;
     const hit = wedges.find((w) => posSec >= w.startSec && posSec < w.startSec + w.durationSec);
-    onSelect(hit ? hit.stepIndex : steps.length - 1);
+    if (hit) onSelect(hit.stepIndex);
     dragRef.current = null;
   };
 
@@ -187,24 +216,30 @@ export function useTimeEditor(props: TimeEditorProps, opts: Options) {
     }
     const delta = opts.wraps ? unwrapDelta(d.last, p.frac) : p.frac - d.last;
     d.last = p.frac;
-    d.raw = Math.min(maxFor(d.index) + 30, Math.max(minFor() - 30, d.raw + delta * scaleRef.current));
-    apply(d.index, d.raw);
+    d.raw += delta * scaleRef.current;
+    if (d.type === 'end') {
+      d.raw = Math.min(MAX_TOTAL_SEC + 30, Math.max(-30, d.raw));
+      applyEnd(d.raw);
+    } else {
+      applyBoundary(d.a, d.b, d.raw);
+    }
   };
 
   const onPointerUp = () => {
     const d = dragRef.current;
     dragRef.current = null;
-    setFrozen(null);
+    setDragging(false);
     if (d?.type === 'center' && !d.moved) onCenterTap();
   };
 
-  const sel = steps[Math.min(props.selected, steps.length - 1)];
+  const sel = steps[Math.min(selected, steps.length - 1)];
 
   return {
-    exact,
+    simple,
     wedges,
+    handles,
     scale,
-    lapSec,
+    totalSec,
     dragging,
     sel,
     handlers: { onPointerDown, onPointerMove, onPointerUp, onPointerCancel: onPointerUp },

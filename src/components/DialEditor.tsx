@@ -1,15 +1,15 @@
 import { useRef, type PointerEvent as ReactPointerEvent } from 'react';
 import { angleFrac, MAX_TOTAL_SEC, scaleLabel } from '../core/dialScale';
 import { formatClock } from '../core/format';
+import { shares } from '../core/split';
 import { kindColor } from './Dial';
 import { arcPath, C, polar, R_MAIN, SIZE, STROKE } from './dialGeometry';
-import { useTimeEditor, type TimeEditorProps } from './useTimeEditor';
+import { useTimeEditor, type EditorStep, type TimeEditorProps } from './useTimeEditor';
 
 /**
  * 設定用の円グラフ（リング）。
- * - タイマー: 円をなぞる／ハンドルを回すと時間が決まる（キッチンタイマーの要領）。1周の長さは自動で切替
- * - インターバル: 「Nラウンド」でちょうど1周。繰り返し部分も扇形で並ぶ。
- *   1ラウンド目の各扇形の終わりにあるハンドルを回すと、その区間の長さが全ラウンドで変わる
+ * - タイマー: 円をなぞる／つまみを回すと時間が決まる（キッチンタイマーの要領）。1周の長さは自動で切替
+ * - インターバル: 1周＝プログラム全体。区間の境目のつまみを回すと、合計はそのままで配分（割合）が変わる
  */
 export function DialEditor(props: TimeEditorProps) {
   const svgRef = useRef<SVGSVGElement>(null);
@@ -21,13 +21,12 @@ export function DialEditor(props: TimeEditorProps) {
     const zone = r < R_MAIN - STROKE / 2 - 10 ? 'center' : r > R_MAIN + STROKE / 2 + 30 ? 'outside' : 'track';
     return { x, y, zone, frac: angleFrac(C, C, x, y) } as const;
   };
-  const { exact, wedges, scale, lapSec, dragging, sel, handlers } = useTimeEditor(props, {
+  const { simple, wedges, handles, scale, dragging, sel, handlers } = useTimeEditor(props, {
     wraps: true,
     handleHit: 0.05,
     toPoint,
   });
-  const { mode, selected, rounds, lapRounds, lapName, programTotalSec } = props;
-  const selColor = kindColor(sel?.kind);
+  const { selected } = props;
 
   return (
     <div className={`dial editor ${dragging ? 'dragging' : ''}`}>
@@ -45,13 +44,13 @@ export function DialEditor(props: TimeEditorProps) {
       >
         <circle cx={C} cy={C} r={R_MAIN} className="track" strokeWidth={STROKE} />
 
-        {/* 扇形（各区間。2ラウンド目以降は少し淡く） */}
+        {/* 扇形（各区間。2サイクル目以降は少し淡く） */}
         {wedges.map((w, i) => {
           if (w.durationSec <= 0) return null;
           const from = w.startSec / scale;
           const to = Math.min(1, (w.startSec + w.durationSec) / scale);
           if (to <= from) return null;
-          const isSel = mode === 'simple' || w.stepIndex === selected;
+          const isSel = simple || w.stepIndex === selected;
           const opacity = (isSel ? 1 : 0.45) * (w.round === 1 ? 1 : 0.7);
           return (
             <path key={i} d={arcPath(R_MAIN, from, to)} stroke={kindColor(w.kind)} strokeWidth={STROKE} fill="none" opacity={opacity} />
@@ -59,14 +58,14 @@ export function DialEditor(props: TimeEditorProps) {
         })}
 
         {/* 目盛り（タイマーのみ。1/4・1/2・3/4 にラベル） */}
-        {!exact &&
+        {simple &&
           Array.from({ length: 12 }, (_, i) => {
             const r0 = R_MAIN - STROKE / 2 - 5;
             const [x1, y1] = polar(r0, i / 12);
             const [x2, y2] = polar(r0 - (i % 3 === 0 ? 8 : 4), i / 12);
             return <line key={i} x1={x1} y1={y1} x2={x2} y2={y2} className="minor-tick" />;
           })}
-        {!exact &&
+        {simple &&
           [0.25, 0.5, 0.75].map((f) => {
             const [x, y] = polar(R_MAIN - STROKE / 2 - 22, f);
             return (
@@ -76,8 +75,8 @@ export function DialEditor(props: TimeEditorProps) {
             );
           })}
 
-        {/* 区切り線（ラウンドの境目は太め） */}
-        {mode === 'interval' &&
+        {/* 区切り線（サイクルの境目は太め） */}
+        {!simple &&
           wedges.map((w, i) => {
             const f = w.startSec / scale;
             if (f >= 1) return null;
@@ -95,22 +94,20 @@ export function DialEditor(props: TimeEditorProps) {
             );
           })}
 
-        {/* ハンドル（1ラウンド目の各区間の終わり） */}
-        {wedges.map((w, i) => {
-          if (w.round !== 1) return null;
-          const end = Math.min(1, (w.startSec + w.durationSec) / scale);
-          const [x, y] = polar(R_MAIN, end);
-          const active = mode === 'simple' || w.stepIndex === selected;
+        {/* つまみ */}
+        {handles.map((h) => {
+          if (!h.visible) return null;
+          const [x, y] = polar(R_MAIN, h.frac);
           return (
-            <g key={`h${i}`} className={`handle ${active ? 'active' : ''}`}>
-              <circle cx={x} cy={y} r={active ? 15 : 11} className="handle-dot" stroke={kindColor(w.kind)} />
+            <g key={h.key} className={`handle ${h.active ? 'active' : ''}`}>
+              <circle cx={x} cy={y} r={h.active ? 15 : 11} className="handle-dot" stroke={kindColor(h.kind)} />
             </g>
           );
         })}
       </svg>
 
       <div className="dial-center">
-        <EditorSummary {...{ mode, sel, selColor, rounds, lapRounds, lapName, programTotalSec, lapSec }} />
+        <EditorSummary mode={props.mode} steps={props.steps} sel={sel} rounds={props.rounds} />
       </div>
     </div>
   );
@@ -119,45 +116,38 @@ export function DialEditor(props: TimeEditorProps) {
 /** 設定中に中央（バーなら上下）に出す文字情報。part で上半分（名前・時間）/ 下半分（補足）だけ出せる */
 export function EditorSummary({
   mode,
+  steps,
   sel,
-  selColor,
   rounds,
-  lapRounds,
-  lapName,
-  programTotalSec,
-  lapSec,
   part,
 }: {
   mode: 'simple' | 'interval';
-  sel: { label: string; durationSec: number } | undefined;
-  selColor: string;
+  steps: EditorStep[];
+  sel: EditorStep | undefined;
   rounds: number;
-  lapRounds: number;
-  lapName: string;
-  programTotalSec: number;
-  lapSec: number;
   part?: 'head' | 'foot';
 }) {
   const dur = sel?.durationSec ?? 0;
   const head = (
     <>
-      <div className="dial-label" style={{ color: selColor }}>
+      <div className="dial-label" style={{ color: kindColor(sel?.kind) }}>
         {mode === 'simple' ? 'タイマー' : sel?.label}
       </div>
       <div className="dial-time">{formatClock(dur * 1000)}</div>
     </>
   );
+  const sh = shares(steps);
   const foot =
     mode === 'simple' ? (
       <div className="dial-sub dim">{dur > 0 ? 'タップでスタート' : 'なぞって時間を設定'}</div>
     ) : (
       <>
         <div className="dial-sub">
-          ×{rounds} ・ 合計 {formatClock(programTotalSec * 1000)}
+          合計 {formatClock(steps.reduce((a, s) => a + s.durationSec, 0) * rounds * 1000)}
+          {rounds > 1 ? ` ・ ×${rounds}` : ''}
         </div>
         <div className="dial-sub dim">
-          1周 = {lapName}
-          {lapRounds < rounds ? `（${formatClock(lapSec * 1000)}）` : ''}
+          ワーク {sh.work}% ・ 休憩 {sh.rest}%
         </div>
       </>
     );
