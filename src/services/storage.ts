@@ -1,7 +1,8 @@
 import { defaultAnnounceSettings, type AnnounceSettings } from '../core/announcer';
 import { intervalProgram, makeStep, newId, type Program } from '../core/program';
 
-export type DialStyle = 'ring' | 'pie';
+/** 表示スタイル: 円（リング）または 左→右 のバー */
+export type DialStyle = 'ring' | 'bar';
 
 export interface Settings {
   voiceEnabled: boolean;
@@ -48,9 +49,12 @@ function write(key: string, value: unknown) {
 
 export function loadSettings(): Settings {
   const saved = read<Partial<Settings>>(KEY_SETTINGS);
+  // 以前あった「パイ」はバーに置き換えた
+  const dialStyle: DialStyle = (saved?.dialStyle as string) === 'pie' || saved?.dialStyle === 'bar' ? 'bar' : 'ring';
   return {
     ...defaultSettings,
     ...saved,
+    dialStyle,
     announce: { ...defaultAnnounceSettings, ...saved?.announce },
   };
 }

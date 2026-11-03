@@ -6,6 +6,7 @@ import { lapLabel, nextLapUnit, roundsPerLap } from './core/laps';
 import { intervalProgram, isSimple, newId, programLap, simpleProgram, type Program } from './core/program';
 import { parseVoiceCommand, VOICE_HELP_TEXT, type VoiceCommand } from './core/voiceCommands';
 import { Controls } from './components/Controls';
+import { BarEditor, BarView } from './components/Bar';
 import { Dial } from './components/Dial';
 import { DialEditor } from './components/DialEditor';
 import { IntervalEditBar, SimpleEditBar } from './components/EditBar';
@@ -280,6 +281,8 @@ export function App() {
   };
 
   const idle = snap.status === 'idle';
+  const Editor = settings.dialStyle === 'bar' ? BarEditor : DialEditor;
+  const Running = settings.dialStyle === 'bar' ? BarView : Dial;
   // 動作中だけはモードを切り替えられない（誤タップで止まらないように）。一時停止中なら切り替えると最初からになる
   const locked = snap.status === 'running';
   const switchMode = (mode: Mode) => {
@@ -344,7 +347,7 @@ export function App() {
           </div>
         )}
         {idle ? (
-          <DialEditor
+          <Editor
             mode={editor.mode}
             steps={program.steps}
             selected={editor.selected}
@@ -353,7 +356,6 @@ export function App() {
             lapName={lapLabel(programLap(program), program.rounds)}
             skipLastRest={program.skipLastRest}
             programTotalSec={Math.round(snap.totalMs / 1000)}
-            style={settings.dialStyle}
             onSelect={(i) => updateEditor((e) => ({ ...e, selected: i }))}
             onChange={(i, sec) =>
               editorRef.current.mode === 'simple'
@@ -364,7 +366,7 @@ export function App() {
             onDetent={() => sound.vibrate([4])}
           />
         ) : (
-          <Dial snap={snap} style={settings.dialStyle} lap={programLap(program)} onTap={toggleTimer} />
+          <Running snap={snap} lap={programLap(program)} onTap={toggleTimer} />
         )}
       </div>
 

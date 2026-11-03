@@ -34,9 +34,9 @@ export function SettingsPanel({ settings, onChange, onClose, onTestVoice }: Prop
 
         <h3>表示</h3>
         <div className="segmented">
-          {(['ring', 'pie'] as const).map((s) => (
+          {(['ring', 'bar'] as const).map((s) => (
             <button key={s} className={settings.dialStyle === s ? 'active' : ''} onClick={() => set({ dialStyle: s })}>
-              {s === 'ring' ? 'リング' : 'パイ（円グラフ）'}
+              {s === 'ring' ? '円（リング）' : 'バー（左→右）'}
             </button>
           ))}
         </div>
@@ -87,7 +87,7 @@ export function SettingsPanel({ settings, onChange, onClose, onTestVoice }: Prop
 
         <h3>ダイヤルの使い方</h3>
         <ul className="help-list">
-          <li>止まっているときは、円をなぞる／白いハンドルを回すと時間を設定できます</li>
+          <li>止まっているときは、円（バー）をなぞる／白いつまみを動かすと時間を設定できます</li>
           <li>インターバルでは、扇形をタップで区間を選択、ハンドルを回すとその区間の長さが変わります</li>
           <li>選択中の区間ボタンをもう一度タップすると、ワーク / 休憩 が切り替わります</li>
           <li>円の中央をタップでスタート / 一時停止</li>

@@ -362,18 +362,6 @@ button:disabled {
   transition: stroke 0.4s;
 }
 
-.pie-bg {
-  fill: var(--surface-2);
-}
-
-.pie {
-  transition: fill 0.4s;
-}
-
-.pie-hole {
-  fill: var(--bg);
-}
-
 .knob {
   fill: #fff;
   filter: drop-shadow(0 1px 4px rgba(0, 0, 0, 0.45));
@@ -444,28 +432,170 @@ button:disabled {
   font-size: 16cqw;
 }
 
-.dial.style-pie .dial-time {
-  font-size: 15cqw;
-}
-
-.dial.style-pie .dial-label {
-  font-size: 4.6cqw;
-}
-
-.dial.style-pie .dial-sub {
-  font-size: 3.6cqw;
-}
-
-.dial.style-pie .dial-sub.dim {
-  font-size: 3.2cqw;
-}
-
 .dial.paused .dial-time {
   animation: blink 1.4s infinite;
 }
 
 .dial.finished .dial-svg {
   animation: pop 0.6s ease-out;
+}
+
+/* ---- Bar（左→右） ---- */
+.bar-view {
+  width: 100%;
+  max-width: 520px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 14px;
+  container-type: inline-size;
+  cursor: pointer;
+}
+
+.bar-view.editor {
+  touch-action: none;
+}
+
+.bar-head,
+.bar-foot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.bar-foot {
+  min-height: 2.6em;
+}
+
+.bar {
+  position: relative;
+  height: clamp(76px, 26cqw, 132px);
+}
+
+.bar-fill {
+  position: absolute;
+  inset: 0;
+  border-radius: 18px;
+  overflow: hidden;
+  background: var(--surface-2);
+}
+
+.bar-block {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  transition: background 0.3s;
+}
+
+.bar-block.has-sep {
+  box-shadow: inset 2.5px 0 0 var(--bg);
+}
+
+.bar-block.round-edge {
+  box-shadow: inset 5px 0 0 var(--bg);
+}
+
+.bar-block-label {
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 0 6px;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+}
+
+.bar-cursor {
+  position: absolute;
+  top: -8px;
+  bottom: -8px;
+  width: 6px;
+  margin-left: -3px;
+  background: #fff;
+  border-radius: 3px;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+}
+
+.bar-handle {
+  position: absolute;
+  top: -10px;
+  bottom: -10px;
+  width: 14px;
+  margin-left: -7px;
+  background: #fff;
+  border: 3px solid;
+  border-radius: 9px;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+  transition: transform 0.15s;
+}
+
+.bar-handle.active {
+  width: 20px;
+  margin-left: -10px;
+  border-width: 4px;
+}
+
+.bar-view.dragging .bar-handle.active {
+  transform: scaleX(1.25);
+}
+
+.bar-scale {
+  position: relative;
+  height: 14px;
+  margin-top: -6px;
+  font-size: 11px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.bar-scale span {
+  position: absolute;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+.bar-scale span:first-child {
+  transform: none;
+}
+
+.bar-scale span:last-child {
+  transform: translateX(-100%);
+}
+
+.bar-total {
+  position: relative;
+  height: 6px;
+  margin-top: -4px;
+  border-radius: 3px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+
+.bar-total-fill {
+  height: 100%;
+  background: var(--text-dim);
+}
+
+.bar-total-tick {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--bg);
+}
+
+.bar-view.paused .dial-time {
+  animation: blink 1.4s infinite;
 }
 
 /* ---- Controls ---- */
