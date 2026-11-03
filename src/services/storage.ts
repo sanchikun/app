@@ -26,6 +26,8 @@ export const defaultSettings: Settings = {
 const KEY_SETTINGS = 'vrt.settings.v1';
 const KEY_PRESETS = 'vrt.presets.v1';
 const KEY_EDITOR = 'vrt.editor.v1';
+/** 「最後の休憩を省略」を既定オフに変えたときの一度きりの移行済みフラグ */
+const KEY_MIGRATED_REST = 'vrt.migrated.keepLastRest';
 
 function read<T>(key: string): T | null {
   try {
@@ -66,12 +68,32 @@ export function builtinPresets(): Program[] {
     steps: [makeStep('右', 30, 'work'), makeStep('切り替え', 5, 'rest'), makeStep('左', 30, 'work'), makeStep('休憩', 10, 'rest')],
     rounds: 3,
     prepareSec: 5,
-    skipLastRest: true,
+    skipLastRest: false,
   };
   return [basic, tabata, pomodoro, stretch].map((p, i) => ({ ...p, id: `builtin-${i}` }));
 }
 
+/**
+ * 以前は「最後のラウンドの休憩を省略」が既定オンだった。
+ * ×2 にするとワークが連続して見えて分かりにくいため既定オフに変更し、
+ * 既に保存されている編集中のインターバルと内蔵プリセットも一度だけオフに揃える。
+ */
+function migrateKeepLastRest() {
+  if (read<boolean>(KEY_MIGRATED_REST)) return;
+  const presets = read<Program[]>(KEY_PRESETS);
+  if (presets) {
+    write(
+      KEY_PRESETS,
+      presets.map((p) => (p.id.startsWith('builtin-') ? { ...p, skipLastRest: false } : p)),
+    );
+  }
+  const editor = read<EditorState>(KEY_EDITOR);
+  if (editor?.interval) write(KEY_EDITOR, { ...editor, interval: { ...editor.interval, skipLastRest: false } });
+  write(KEY_MIGRATED_REST, true);
+}
+
 export function loadPresets(): Program[] {
+  migrateKeepLastRest();
   return read<Program[]>(KEY_PRESETS) ?? builtinPresets();
 }
 
@@ -98,6 +120,7 @@ export function defaultEditor(): EditorState {
 }
 
 export function loadEditor(): EditorState {
+  migrateKeepLastRest();
   const saved = read<Partial<EditorState>>(KEY_EDITOR);
   const base = defaultEditor();
   if (!saved) return base;

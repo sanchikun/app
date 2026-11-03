@@ -9,8 +9,14 @@ describe('buildSegments', () => {
     expect(totalDurationMs(segs)).toBe(180_000);
   });
 
-  it('インターバル 1分→30秒 ×3 は最後の休憩を省略して5区間', () => {
-    const segs = buildSegments(intervalProgram(60, 30, 3));
+  it('インターバル 1分→30秒 ×2 は既定で「ワーク→休憩」を2回（最後の休憩も含む）', () => {
+    const segs = buildSegments(intervalProgram(60, 30, 2));
+    expect(segs.map((s) => s.kind)).toEqual(['work', 'rest', 'work', 'rest']);
+    expect(totalDurationMs(segs)).toBe(180_000);
+  });
+
+  it('skipLastRest=true なら 1分→30秒 ×3 は最後の休憩を省略して5区間', () => {
+    const segs = buildSegments(intervalProgram(60, 30, 3, { skipLastRest: true }));
     expect(segs.map((s) => `${s.label}${s.round}`)).toEqual(['ワーク1', '休憩1', 'ワーク2', '休憩2', 'ワーク3']);
     expect(totalDurationMs(segs)).toBe(60_000 * 3 + 30_000 * 2);
     expect(segs[2].startMs).toBe(90_000);

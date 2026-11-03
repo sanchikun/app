@@ -36,7 +36,7 @@ describe('detectCues', () => {
   });
 
   it('インターバル: 区間の切り替えを読み上げる / 短い休憩で「残り30秒」は言わない', () => {
-    const texts = simulate(intervalProgram(60, 30, 2), 151_000).map((c) => c.text);
+    const texts = simulate(intervalProgram(60, 30, 2, { skipLastRest: true }), 151_000).map((c) => c.text);
     expect(texts).toEqual([
       'スタート。ラウンド1。ワーク、1分',
       '残り30秒',

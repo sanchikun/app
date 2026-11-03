@@ -86,7 +86,8 @@ export function intervalProgram(
     steps,
     rounds: Math.max(1, Math.floor(rounds)),
     prepareSec: opts.prepareSec ?? 0,
-    skipLastRest: opts.skipLastRest ?? true,
+    // ×N は「ワーク+休憩」を N 回。最後の休憩も残すのが既定（ダイヤルでワーク同士が隣り合わないように）
+    skipLastRest: opts.skipLastRest ?? false,
   };
 }
 

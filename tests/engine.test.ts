@@ -38,7 +38,7 @@ describe('TimerEngine', () => {
 
   it('インターバルで区間が切り替わる', () => {
     const c = fakeClock();
-    const e = new TimerEngine(intervalProgram(60, 30, 2), c.clock);
+    const e = new TimerEngine(intervalProgram(60, 30, 2, { skipLastRest: true }), c.clock);
     e.start();
     c.advance(61_000);
     let s = e.getSnapshot();
@@ -52,7 +52,7 @@ describe('TimerEngine', () => {
 
   it('skip で次の区間へ、最後の区間で skip すると終了', () => {
     const c = fakeClock();
-    const e = new TimerEngine(intervalProgram(60, 30, 2), c.clock);
+    const e = new TimerEngine(intervalProgram(60, 30, 2, { skipLastRest: true }), c.clock);
     e.start();
     c.advance(5_000);
     e.skip();
@@ -65,7 +65,7 @@ describe('TimerEngine', () => {
 
   it('previous は区間の頭へ、頭付近ならさらに前の区間へ', () => {
     const c = fakeClock();
-    const e = new TimerEngine(intervalProgram(60, 30, 2), c.clock);
+    const e = new TimerEngine(intervalProgram(60, 30, 2, { skipLastRest: true }), c.clock);
     e.start();
     c.advance(70_000); // 休憩の10秒目
     e.previous();
@@ -78,7 +78,7 @@ describe('TimerEngine', () => {
 
   it('addTime で現在区間が伸び、以降の区間が後ろにずれる', () => {
     const c = fakeClock();
-    const e = new TimerEngine(intervalProgram(60, 30, 2), c.clock);
+    const e = new TimerEngine(intervalProgram(60, 30, 2, { skipLastRest: true }), c.clock);
     e.start();
     c.advance(50_000);
     e.addTime(60_000);
