@@ -25,7 +25,7 @@ export const defaultSettings: Settings = {
 
 const KEY_SETTINGS = 'vrt.settings.v1';
 const KEY_PRESETS = 'vrt.presets.v1';
-const KEY_LAST = 'vrt.last.v1';
+const KEY_EDITOR = 'vrt.editor.v1';
 
 function read<T>(key: string): T | null {
   try {
@@ -77,5 +77,37 @@ export function loadPresets(): Program[] {
 
 export const savePresets = (p: Program[]) => write(KEY_PRESETS, p);
 
-export const loadLastProgram = () => read<Program>(KEY_LAST);
-export const saveLastProgram = (p: Program) => write(KEY_LAST, p);
+export type Mode = 'simple' | 'interval';
+
+/** 画面で編集中の内容（モードごとに保持して、切り替えても失われないように） */
+export interface EditorState {
+  mode: Mode;
+  simpleSec: number;
+  interval: Program;
+  /** インターバルで選択中の区間 */
+  selected: number;
+}
+
+export function defaultEditor(): EditorState {
+  return {
+    mode: 'simple',
+    simpleSec: 180,
+    interval: { ...intervalProgram(60, 30, 5, { prepareSec: 5 }), name: 'インターバル' },
+    selected: 0,
+  };
+}
+
+export function loadEditor(): EditorState {
+  const saved = read<Partial<EditorState>>(KEY_EDITOR);
+  const base = defaultEditor();
+  if (!saved) return base;
+  const interval = saved.interval?.steps?.length ? saved.interval : base.interval;
+  return {
+    mode: saved.mode === 'interval' ? 'interval' : 'simple',
+    simpleSec: typeof saved.simpleSec === 'number' ? saved.simpleSec : base.simpleSec,
+    interval,
+    selected: Math.min(Math.max(0, saved.selected ?? 0), interval.steps.length - 1),
+  };
+}
+
+export const saveEditor = (e: EditorState) => write(KEY_EDITOR, e);

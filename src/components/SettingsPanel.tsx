@@ -1,5 +1,14 @@
 import type { AnnounceSettings } from '../core/announcer';
 import type { Settings } from '../services/storage';
+import { Sheet } from './Sheet';
+
+const VOICE_EXAMPLES = [
+  '「3分タイマー」「1分半」「5分にセットして」',
+  '「スタート」「ストップ」「再開」「リセット」',
+  '「次」「戻って」「残りは？」「1分追加」',
+  '「1分と30秒のインターバル 5回」',
+  '「ワーク40秒 休憩20秒 8セット」',
+];
 
 interface Props {
   settings: Settings;
@@ -21,12 +30,7 @@ export function SettingsPanel({ settings, onChange, onClose, onTestVoice }: Prop
   );
 
   return (
-    <div className="sheet-backdrop" onClick={onClose}>
-      <div className="sheet" role="dialog" aria-label="設定" onClick={(e) => e.stopPropagation()}>
-        <div className="sheet-head">
-          <h2>設定</h2>
-          <button className="icon" onClick={onClose} aria-label="閉じる">✕</button>
-        </div>
+    <Sheet title="設定" onClose={onClose}>
 
         <h3>表示</h3>
         <div className="segmented">
@@ -73,7 +77,22 @@ export function SettingsPanel({ settings, onChange, onClose, onTestVoice }: Prop
             ))}
           </select>
         </label>
-      </div>
-    </div>
+
+        <h3>話しかけ方（マイクをオンにして）</h3>
+        <ul className="help-list">
+          {VOICE_EXAMPLES.map((e) => (
+            <li key={e}>{e}</li>
+          ))}
+        </ul>
+
+        <h3>ダイヤルの使い方</h3>
+        <ul className="help-list">
+          <li>止まっているときは、円をなぞる／白いハンドルを回すと時間を設定できます</li>
+          <li>インターバルでは、扇形をタップで区間を選択、ハンドルを回すとその区間の長さが変わります</li>
+          <li>選択中の区間ボタンをもう一度タップすると、ワーク / 休憩 が切り替わります</li>
+          <li>円の中央をタップでスタート / 一時停止</li>
+          <li>PC: Space 開始/一時停止 ・ R リセット ・ ←/→ 前/次の区間</li>
+        </ul>
+    </Sheet>
   );
 }

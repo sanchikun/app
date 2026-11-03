@@ -2,6 +2,7 @@ import type { TimerSnapshot } from '../core/engine';
 import { formatClock, shortDuration } from '../core/format';
 import type { StepKind } from '../core/program';
 import type { DialStyle } from '../services/storage';
+import { C, polar, R_MAIN, R_OUTER, sectorPath, SIZE, STROKE } from './dialGeometry';
 
 interface Props {
   snap: TimerSnapshot;
@@ -9,31 +10,8 @@ interface Props {
   onTap?: () => void;
 }
 
-const SIZE = 320;
-const C = SIZE / 2;
-const R_MAIN = 128;
-const STROKE = 26;
-const R_OUTER = 152;
-
 export const kindColor = (kind: StepKind | undefined) =>
   kind === 'rest' ? 'var(--rest)' : kind === 'prepare' ? 'var(--prepare)' : 'var(--work)';
-
-/** 12時の位置から時計回りに angle(0..1) 進んだ点 */
-function polar(r: number, frac: number): [number, number] {
-  const a = frac * 2 * Math.PI - Math.PI / 2;
-  return [C + r * Math.cos(a), C + r * Math.sin(a)];
-}
-
-/** 12時から時計回りに from→to(0..1) の扇形パス */
-function sectorPath(r: number, from: number, to: number): string {
-  if (to - from >= 0.9999) {
-    return `M ${C} ${C - r} A ${r} ${r} 0 1 1 ${C - 0.01} ${C - r} Z`;
-  }
-  const [x1, y1] = polar(r, from);
-  const [x2, y2] = polar(r, to);
-  const large = to - from > 0.5 ? 1 : 0;
-  return `M ${C} ${C} L ${x1} ${y1} A ${r} ${r} 0 ${large} 1 ${x2} ${y2} Z`;
-}
 
 /**
  * 円グラフ型ダイヤル。現在の区間（例: ワーク1分）の長さでちょうど1周する。

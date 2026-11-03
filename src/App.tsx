@@ -2,24 +2,28 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Cue } from './core/announcer';
 import type { TimerSnapshot } from './core/engine';
 import { cueToSpeech, formatClock, speakDuration, statusSpeech } from './core/format';
-import { intervalProgram, simpleProgram, type Program } from './core/program';
+import { intervalProgram, isSimple, newId, simpleProgram, type Program } from './core/program';
 import { parseVoiceCommand, VOICE_HELP_TEXT, type VoiceCommand } from './core/voiceCommands';
 import { Controls } from './components/Controls';
 import { Dial } from './components/Dial';
+import { DialEditor } from './components/DialEditor';
+import { IntervalEditBar, SimpleEditBar } from './components/EditBar';
+import { IntervalSheet } from './components/IntervalSheet';
+import { PresetSheet } from './components/PresetSheet';
 import { SettingsPanel } from './components/SettingsPanel';
-import { SetupPanel } from './components/SetupPanel';
-import { VoicePanel } from './components/VoicePanel';
 import { useTimer } from './hooks/useTimer';
 import { VoiceRecognizer, type ListenState } from './services/recognition';
 import { sound } from './services/sound';
 import { speech } from './services/speech';
 import {
-  loadLastProgram,
+  loadEditor,
   loadPresets,
   loadSettings,
-  saveLastProgram,
+  saveEditor,
   savePresets,
   saveSettings,
+  type EditorState,
+  type Mode,
   type Settings,
 } from './services/storage';
 import { keepAwake } from './services/wakeLock';
@@ -29,11 +33,22 @@ function unlockMedia() {
   sound.unlock();
 }
 
+const programFor = (e: EditorState): Program => (e.mode === 'simple' ? simpleProgram(e.simpleSec) : e.interval);
+
+const clonePreset = (p: Program): Program => ({
+  ...p,
+  id: newId('prog'),
+  steps: p.steps.map((s) => ({ ...s, id: newId('step') })),
+});
+
+type SheetKind = 'settings' | 'presets' | 'interval' | null;
+
 export function App() {
   const [settings, setSettings] = useState<Settings>(loadSettings);
-  const [program, setProgram] = useState<Program>(() => loadLastProgram() ?? simpleProgram(180));
+  const [editor, setEditor] = useState<EditorState>(loadEditor);
   const [presets, setPresets] = useState<Program[]>(loadPresets);
-  const [showSettings, setShowSettings] = useState(false);
+  const [sheet, setSheet] = useState<SheetKind>(null);
+  const editorRef = useRef(editor);
 
   // 設定をサービスへ反映
   useEffect(() => {
@@ -59,17 +74,49 @@ export function App() {
     }
   }, []);
 
-  const [snap, timer] = useTimer(program, settings.announce, handleCues);
+  const [snap, timer] = useTimer(programFor(editor), settings.announce, handleCues);
+  // simpleProgram は呼ぶたびに id が変わるので、中身が変わったときだけ作り直す
+  const program = useMemo(() => programFor(editor), [editor.mode, editor.simpleSec, editor.interval]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const applyProgram = useCallback(
-    (p: Program, autoStart: boolean) => {
-      timer.load(p);
-      setProgram(p);
-      saveLastProgram(p);
-      if (autoStart) timer.start();
+  /**
+   * 編集内容を確定してタイマーに反映する。
+   * 動作中・一時停止中は（force でない限り）タイマーはそのまま。
+   */
+  const commitEditor = useCallback(
+    (next: EditorState, opts: { force?: boolean; autoStart?: boolean } = {}) => {
+      editorRef.current = next;
+      setEditor(next);
+      saveEditor(next);
+      const st = timer.current().status;
+      if (opts.force || (st !== 'running' && st !== 'paused')) timer.load(programFor(next));
+      if (opts.autoStart) timer.start();
     },
     [timer],
   );
+  const updateEditor = useCallback(
+    (fn: (e: EditorState) => EditorState, opts?: { force?: boolean; autoStart?: boolean }) =>
+      commitEditor(fn(editorRef.current), opts),
+    [commitEditor],
+  );
+
+  const updateInterval = (fn: (p: Program) => Program) => updateEditor((e) => ({ ...e, interval: fn(e.interval) }));
+  const setStepDuration = (i: number, sec: number) =>
+    updateInterval((p) => ({ ...p, steps: p.steps.map((s, j) => (j === i ? { ...s, durationSec: sec } : s)) }));
+
+  const applyPreset = (p: Program) => {
+    if (isSimple(p)) {
+      updateEditor((e) => ({ ...e, mode: 'simple', simpleSec: p.steps[0].durationSec }), { force: true });
+    } else {
+      updateEditor((e) => ({ ...e, mode: 'interval', interval: clonePreset(p), selected: 0 }), { force: true });
+    }
+  };
+
+  const savePreset = (p: Program) => {
+    const preset = { ...clonePreset(p), id: newId('preset') };
+    const next = [...presets, preset];
+    setPresets(next);
+    savePresets(next);
+  };
 
   // 画面スリープ防止
   useEffect(() => {
@@ -80,14 +127,22 @@ export function App() {
   useEffect(() => {
     const label = snap.segments.length > 1 && snap.segment ? ` ${snap.segment.label}` : '';
     document.title =
-      snap.status === 'idle' ? 'リングタイマー' : snap.status === 'finished' ? '完了 - リングタイマー' : `${formatClock(snap.segmentRemainingMs)}${label}`;
+      snap.status === 'idle'
+        ? 'リングタイマー'
+        : snap.status === 'finished'
+          ? '完了 - リングタイマー'
+          : `${formatClock(snap.segmentRemainingMs)}${label}`;
   }, [snap.status, snap.segmentRemainingMs, snap.segment, snap.segments.length]);
 
   // ---- 音声コマンド ----
   const [listenState, setListenState] = useState<ListenState>('off');
-  const [listenError, setListenError] = useState<string>();
-  const [lastHeard, setLastHeard] = useState('');
-  const [lastAction, setLastAction] = useState('');
+  const [toast, setToast] = useState<{ text: string; sub?: string; key: number } | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const showToast = useCallback((text: string, sub?: string) => {
+    setToast({ text, sub, key: Date.now() });
+    clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(null), 3500);
+  }, []);
 
   const runCommand = useCallback(
     (cmd: VoiceCommand): string => {
@@ -132,9 +187,11 @@ export function App() {
           speech.speak(`${speakDuration(cmd.deltaSec * 1000)}追加しました`, { interrupt: true });
           return `${speakDuration(cmd.deltaSec * 1000)}追加`;
         case 'set': {
-          const p = simpleProgram(cmd.durationSec);
           if (!cmd.autoStart) speech.speak(`${speakDuration(cmd.durationSec * 1000)}にセットしました`, { interrupt: true });
-          applyProgram(p, cmd.autoStart);
+          updateEditor((e) => ({ ...e, mode: 'simple', simpleSec: cmd.durationSec }), {
+            force: true,
+            autoStart: cmd.autoStart,
+          });
           return `${speakDuration(cmd.durationSec * 1000)}${cmd.autoStart ? 'でスタート' : 'にセット'}`;
         }
         case 'interval': {
@@ -146,7 +203,10 @@ export function App() {
             `ワーク${speakDuration(cmd.workSec * 1000)}、休憩${speakDuration(cmd.restSec * 1000)}を${cmd.rounds}回${cmd.autoStart ? '' : 'にセットしました'}`,
             { interrupt: true },
           );
-          applyProgram(p, cmd.autoStart);
+          updateEditor((e) => ({ ...e, mode: 'interval', interval: p, selected: 0 }), {
+            force: true,
+            autoStart: cmd.autoStart,
+          });
           return `インターバル ${speakDuration(cmd.workSec * 1000)}/${speakDuration(cmd.restSec * 1000)} ×${cmd.rounds}`;
         }
         case 'help':
@@ -154,46 +214,49 @@ export function App() {
           return 'ヘルプ';
       }
     },
-    [timer, applyProgram],
+    [timer, updateEditor],
   );
 
   const runCommandRef = useRef(runCommand);
   runCommandRef.current = runCommand;
+  const showToastRef = useRef(showToast);
+  showToastRef.current = showToast;
 
   const recognizer = useMemo(
     () =>
       new VoiceRecognizer({
         onResult: (alts) => {
-          setLastHeard(alts[0] ?? '');
           for (const alt of alts) {
             const cmd = parseVoiceCommand(alt);
             if (cmd) {
-              setLastHeard(alt);
-              setLastAction(runCommandRef.current(cmd));
+              showToastRef.current(`「${alt}」`, runCommandRef.current(cmd));
               return;
             }
           }
-          setLastAction('（コマンドとして認識できませんでした）');
+          showToastRef.current(`「${alts[0] ?? ''}」`, 'コマンドとして認識できませんでした');
         },
         onStateChange: (state, detail) => {
           setListenState(state);
-          setListenError(state === 'error' ? detail : undefined);
+          if (state === 'error' && detail) showToastRef.current(detail);
         },
       }),
     [],
   );
   useEffect(() => () => recognizer.stop(), [recognizer]);
 
+  const listening = listenState === 'listening' || listenState === 'starting';
   const toggleListening = () => {
     unlockMedia();
-    if (listenState === 'listening' || listenState === 'starting') {
+    if (listening) {
       recognizer.stop();
+      showToast('音声操作をオフにしました');
     } else {
       recognizer.start();
+      showToast('話しかけてください', '例: 「3分タイマー」「ストップ」「残りは？」');
     }
   };
 
-  // ---- キーボード操作（PC 試作用） ----
+  // ---- キーボード操作（PC 用） ----
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
@@ -215,34 +278,126 @@ export function App() {
     timer.toggle();
   };
 
+  const idle = snap.status === 'idle';
+  const locked = snap.status === 'running' || snap.status === 'paused';
+  const switchMode = (mode: Mode) => updateEditor((e) => ({ ...e, mode }));
+  const endAt = new Date(Date.now() + snap.totalRemainingMs);
+
   return (
-    <div className={`app status-${snap.status} kind-${snap.segment?.kind ?? 'work'}`}>
+    <div className={`app status-${snap.status} kind-${idle ? 'work' : (snap.segment?.kind ?? 'work')}`}>
       <header className="app-header">
-        <h1>リングタイマー</h1>
+        <button
+          className={`icon mic-mini ${listening ? 'on' : ''}`}
+          onClick={toggleListening}
+          disabled={!VoiceRecognizer.supported}
+          aria-pressed={listening}
+          aria-label={listening ? '音声操作をオフ' : '音声操作をオン'}
+          title="音声操作"
+        >
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden>
+            <path
+              fill="currentColor"
+              d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2Z"
+            />
+          </svg>
+        </button>
+        <div className="mode-switch" role="tablist" aria-label="モード">
+          {(
+            [
+              ['simple', 'タイマー'],
+              ['interval', 'インターバル'],
+            ] as const
+          ).map(([m, label]) => (
+            <button
+              key={m}
+              role="tab"
+              aria-selected={editor.mode === m}
+              className={editor.mode === m ? 'active' : ''}
+              disabled={locked && editor.mode !== m}
+              onClick={() => switchMode(m)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
         <div className="header-actions">
-          <button
-            className={`icon mic-mini ${listenState === 'listening' ? 'on' : ''}`}
-            onClick={toggleListening}
-            disabled={!VoiceRecognizer.supported}
-            aria-label="音声操作の切り替え"
-            title="音声操作"
-          >
-            <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden>
-              <path
-                fill="currentColor"
-                d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2Z"
-              />
-            </svg>
+          <button className="icon" onClick={() => setSheet('presets')} aria-label="プリセット" title="プリセット">
+            ☰
           </button>
-          <button className="icon" onClick={() => setShowSettings(true)} aria-label="設定" title="設定">
+          <button className="icon" onClick={() => setSheet('settings')} aria-label="設定" title="設定">
             ⚙
           </button>
         </div>
       </header>
 
-      <main>
-        <div className="program-name">{program.name}</div>
-        <Dial snap={snap} style={settings.dialStyle} onTap={toggleTimer} />
+      <div className="dial-area">
+        {toast && (
+          <div className="toast" key={toast.key} role="status">
+            <div>{toast.text}</div>
+            {toast.sub && <div className="toast-sub">{toast.sub}</div>}
+          </div>
+        )}
+        {idle ? (
+          <DialEditor
+            mode={editor.mode}
+            steps={program.steps}
+            selected={editor.selected}
+            rounds={program.rounds}
+            programTotalSec={Math.round(snap.totalMs / 1000)}
+            style={settings.dialStyle}
+            onSelect={(i) => updateEditor((e) => ({ ...e, selected: i }))}
+            onChange={(i, sec) =>
+              editorRef.current.mode === 'simple'
+                ? updateEditor((e) => ({ ...e, simpleSec: sec }))
+                : setStepDuration(i, sec)
+            }
+            onCenterTap={toggleTimer}
+            onDetent={() => sound.vibrate([4])}
+          />
+        ) : (
+          <Dial snap={snap} style={settings.dialStyle} onTap={toggleTimer} />
+        )}
+      </div>
+
+      <div className="bottom">
+        <div className="bottom-slot">
+          {idle ? (
+            editor.mode === 'simple' ? (
+              <SimpleEditBar sec={editor.simpleSec} onChange={(sec) => updateEditor((e) => ({ ...e, simpleSec: sec }))} />
+            ) : (
+              <IntervalEditBar
+                program={editor.interval}
+                selected={editor.selected}
+                onSelect={(i) => updateEditor((e) => ({ ...e, selected: i }))}
+                onDuration={setStepDuration}
+                onToggleKind={(i) =>
+                  updateInterval((p) => ({
+                    ...p,
+                    steps: p.steps.map((s, j) => {
+                      if (j !== i) return s;
+                      const kind = s.kind === 'rest' ? 'work' : 'rest';
+                      // 既定の名前のままなら名前も切り替える
+                      const label =
+                        s.label === 'ワーク' || s.label === '休憩' ? (kind === 'rest' ? '休憩' : 'ワーク') : s.label;
+                      return { ...s, kind, label };
+                    }),
+                  }))
+                }
+                onRounds={(n) => updateInterval((p) => ({ ...p, rounds: n }))}
+                onOpenDetail={() => setSheet('interval')}
+              />
+            )
+          ) : (
+            <div className="run-info">
+              <span className="run-name">{program.name}</span>
+              {snap.status !== 'finished' && (
+                <span>
+                  終了予定 {String(endAt.getHours()).padStart(2, '0')}:{String(endAt.getMinutes()).padStart(2, '0')}
+                </span>
+              )}
+            </div>
+          )}
+        </div>
         <Controls
           snap={snap}
           onToggle={toggleTimer}
@@ -251,49 +406,45 @@ export function App() {
           onPrevious={timer.previous}
           onAdd={timer.addTime}
         />
+      </div>
 
-        <VoicePanel
-          supported={VoiceRecognizer.supported}
-          state={listenState}
-          error={listenError}
-          lastHeard={lastHeard}
-          lastAction={lastAction}
-          onToggle={toggleListening}
-        />
-
-        <SetupPanel
-          key={program.id}
-          program={program}
-          presets={presets}
-          onApply={(p, autoStart) => {
-            if (autoStart) unlockMedia();
-            applyProgram(p, autoStart);
-          }}
-          onSavePreset={(p) => {
-            const next = [...presets, p];
-            setPresets(next);
-            savePresets(next);
-          }}
-          onDeletePreset={(id) => {
-            const next = presets.filter((p) => p.id !== id);
-            setPresets(next);
-            savePresets(next);
-          }}
-        />
-      </main>
-
-      <footer className="app-footer">Space: 開始/一時停止 ・ R: リセット ・ ←/→: 前/次の区間</footer>
-
-      {showSettings && (
+      {sheet === 'settings' && (
         <SettingsPanel
           settings={settings}
           onChange={setSettings}
-          onClose={() => setShowSettings(false)}
+          onClose={() => setSheet(null)}
           onTestVoice={() => {
             unlockMedia();
             speech.rate = settings.speechRate;
             speech.speak('残り30秒。ワーク、1分', { interrupt: true });
           }}
+        />
+      )}
+      {sheet === 'presets' && (
+        <PresetSheet
+          presets={presets}
+          current={program}
+          onApply={(p) => {
+            applyPreset(p);
+            setSheet(null);
+          }}
+          onSave={savePreset}
+          onDelete={(id) => {
+            const next = presets.filter((p) => p.id !== id);
+            setPresets(next);
+            savePresets(next);
+          }}
+          onClose={() => setSheet(null)}
+        />
+      )}
+      {sheet === 'interval' && (
+        <IntervalSheet
+          program={editor.interval}
+          onChange={(p) =>
+            updateEditor((e) => ({ ...e, interval: p, selected: Math.min(e.selected, p.steps.length - 1) }))
+          }
+          onSavePreset={savePreset}
+          onClose={() => setSheet(null)}
         />
       )}
     </div>
