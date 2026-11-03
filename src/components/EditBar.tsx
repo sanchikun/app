@@ -35,9 +35,22 @@ interface IntervalProps {
   onToggleKind(i: number): void;
   onRounds(n: number): void;
   onOpenDetail(): void;
+  /** 1周の範囲の表示名（「全体」「1回ごと」「区間ごと」） */
+  lapName: string;
+  onCycleLap(): void;
 }
 
-export function IntervalEditBar({ program, selected, onSelect, onDuration, onToggleKind, onRounds, onOpenDetail }: IntervalProps) {
+export function IntervalEditBar({
+  program,
+  selected,
+  onSelect,
+  onDuration,
+  onToggleKind,
+  onRounds,
+  onOpenDetail,
+  lapName,
+  onCycleLap,
+}: IntervalProps) {
   const step = program.steps[selected];
   return (
     <div className="edit-bar">
@@ -57,6 +70,10 @@ export function IntervalEditBar({ program, selected, onSelect, onDuration, onTog
             </button>
           ))}
         </div>
+        <button className="lap-chip" onClick={onCycleLap} aria-label={`1周の範囲: ${lapName}（タップで切り替え）`} title="1周の範囲を切り替え">
+          <span className="lap-chip-head">1周</span>
+          {lapName}
+        </button>
         <button className="icon" onClick={onOpenDetail} aria-label="インターバルの詳細設定">
           ⋯
         </button>

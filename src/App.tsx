@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Cue } from './core/announcer';
 import type { TimerSnapshot } from './core/engine';
 import { cueToSpeech, formatClock, speakDuration, statusSpeech } from './core/format';
-import { intervalProgram, isSimple, newId, simpleProgram, type Program } from './core/program';
+import { lapLabel, nextLapUnit, roundsPerLap } from './core/laps';
+import { intervalProgram, isSimple, newId, programLap, simpleProgram, type Program } from './core/program';
 import { parseVoiceCommand, VOICE_HELP_TEXT, type VoiceCommand } from './core/voiceCommands';
 import { Controls } from './components/Controls';
 import { Dial } from './components/Dial';
@@ -343,6 +344,9 @@ export function App() {
             steps={program.steps}
             selected={editor.selected}
             rounds={program.rounds}
+            lapRounds={roundsPerLap(programLap(program), program.rounds)}
+            lapName={lapLabel(programLap(program), program.rounds)}
+            skipLastRest={program.skipLastRest}
             programTotalSec={Math.round(snap.totalMs / 1000)}
             style={settings.dialStyle}
             onSelect={(i) => updateEditor((e) => ({ ...e, selected: i }))}
@@ -355,7 +359,7 @@ export function App() {
             onDetent={() => sound.vibrate([4])}
           />
         ) : (
-          <Dial snap={snap} style={settings.dialStyle} onTap={toggleTimer} />
+          <Dial snap={snap} style={settings.dialStyle} lap={programLap(program)} onTap={toggleTimer} />
         )}
       </div>
 
@@ -385,6 +389,8 @@ export function App() {
                 }
                 onRounds={(n) => updateInterval((p) => ({ ...p, rounds: n }))}
                 onOpenDetail={() => setSheet('interval')}
+                lapName={lapLabel(programLap(editor.interval), editor.interval.rounds)}
+                onCycleLap={() => updateInterval((p) => ({ ...p, lap: nextLapUnit(programLap(p), p.rounds) }))}
               />
             )
           ) : (

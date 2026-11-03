@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { formatClock, shortDuration } from '../core/format';
-import { buildSegments, makeStep, totalDurationMs, type Program, type Step, type StepKind } from '../core/program';
+import { lapLabel, roundsPerLap, type LapUnit } from '../core/laps';
+import { buildSegments, makeStep, programLap, totalDurationMs, type Program, type Step, type StepKind } from '../core/program';
 import { DurationInput } from './DurationInput';
 import { Sheet } from './Sheet';
 
@@ -9,6 +10,12 @@ interface Props {
   onChange(p: Program): void;
   onSavePreset(p: Program): void;
   onClose(): void;
+}
+
+/** select の値（N回ごとが全体と同じになる場合は全体にまとめる） */
+function lapValue(unit: LapUnit, rounds: number): string {
+  if (unit === 'segment') return 'segment';
+  return lapLabel(unit, rounds) === '全体' ? 'all' : String(roundsPerLap(unit, rounds));
 }
 
 const KIND_LABEL: Record<StepKind, string> = { work: 'ワーク', rest: '休憩', prepare: '準備' };
@@ -113,6 +120,24 @@ export function IntervalSheet({ program, onChange, onSavePreset, onClose }: Prop
             </div>
           </label>
         </div>
+        <label className="field inline">
+          <span>ダイヤル1周の範囲</span>
+          <select
+            value={lapValue(programLap(program), program.rounds)}
+            onChange={(e) => {
+              const v = e.target.value;
+              update({ lap: v === 'segment' || v === 'all' ? v : Number(v) });
+            }}
+          >
+            <option value="all">全体（{program.rounds}回ぶん）</option>
+            {Array.from({ length: Math.max(0, program.rounds - 1) }, (_, i) => i + 1).map((n) => (
+              <option key={n} value={n}>
+                {n}回ごと
+              </option>
+            ))}
+            <option value="segment">区間ごと（ワーク・休憩それぞれで1周）</option>
+          </select>
+        </label>
         <label className="check">
           <input type="checkbox" checked={program.skipLastRest} onChange={(e) => update({ skipLastRest: e.target.checked })} />
           最後のラウンドの休憩は省略する

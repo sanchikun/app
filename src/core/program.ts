@@ -5,6 +5,8 @@
  * 単発タイマーとインターバルタイマーを同じエンジンで動かす。
  */
 
+import { DEFAULT_LAP, type LapUnit } from './laps';
+
 export type StepKind = 'work' | 'rest' | 'prepare';
 
 export interface Step {
@@ -26,7 +28,11 @@ export interface Program {
   prepareSec: number;
   /** 最終ラウンドの末尾にある休憩ステップを省略するか */
   skipLastRest: boolean;
+  /** ダイヤル1周が表す範囲（未指定なら全体） */
+  lap?: LapUnit;
 }
+
+export const programLap = (p: Program): LapUnit => p.lap ?? DEFAULT_LAP;
 
 /** エンジンが実際に進める1区間 */
 export interface Segment {
