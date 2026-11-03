@@ -14,7 +14,6 @@ interface Props {
 
 /** select の値（N回ごとが全体と同じになる場合は全体にまとめる） */
 function lapValue(unit: LapUnit, rounds: number): string {
-  if (unit === 'segment') return 'segment';
   return lapLabel(unit, rounds) === '全体' ? 'all' : String(roundsPerLap(unit, rounds));
 }
 
@@ -126,16 +125,15 @@ export function IntervalSheet({ program, onChange, onSavePreset, onClose }: Prop
             value={lapValue(programLap(program), program.rounds)}
             onChange={(e) => {
               const v = e.target.value;
-              update({ lap: v === 'segment' || v === 'all' ? v : Number(v) });
+              update({ lap: v === 'all' ? 'all' : Number(v) });
             }}
           >
-            <option value="all">全体（{program.rounds}回ぶん）</option>
             {Array.from({ length: Math.max(0, program.rounds - 1) }, (_, i) => i + 1).map((n) => (
               <option key={n} value={n}>
                 {n}回ごと
               </option>
             ))}
-            <option value="segment">区間ごと（ワーク・休憩それぞれで1周）</option>
+            <option value="all">全体（{program.rounds}回ぶん）</option>
           </select>
         </label>
         <label className="check">

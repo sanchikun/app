@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildLaps, lapLabel, lapOf, nextLapUnit, roundsPerLap } from '../src/core/laps';
+import { buildLaps, lapLabel, lapOf, nextLapUnit, normalizeLap, roundsPerLap } from '../src/core/laps';
 import { buildSegments, intervalProgram } from '../src/core/program';
 
 // ワーク1分 → 休憩30秒 ×3（既定: 最後の休憩も含む）+ 準備5秒
@@ -23,10 +23,6 @@ describe('buildLaps', () => {
     expect(laps.map((l) => l.durationMs)).toEqual([5_000, 180_000, 90_000]);
   });
 
-  it("'segment': 区間ごとに1周", () => {
-    expect(buildLaps(segs, 'segment')).toHaveLength(segs.length);
-  });
-
   it('最後の休憩を省略した場合、最後の周はワークだけになる', () => {
     const skipped = buildSegments(intervalProgram(60, 30, 2, { skipLastRest: true }));
     expect(buildLaps(skipped, 1).map((l) => l.durationMs)).toEqual([90_000, 60_000]);
@@ -40,17 +36,21 @@ describe('buildLaps', () => {
 });
 
 describe('lap helpers', () => {
-  it('表示名と切り替え順（全体 → 1回 → 区間 → 全体）', () => {
+  it('表示名と切り替え（1回ごと ⇔ 全体）', () => {
     expect(lapLabel('all', 5)).toBe('全体');
     expect(lapLabel(1, 5)).toBe('1回ごと');
     expect(lapLabel(5, 5)).toBe('全体');
-    expect(lapLabel('segment', 5)).toBe('区間ごと');
+    expect(nextLapUnit(1, 5)).toBe('all');
+    expect(nextLapUnit(2, 5)).toBe('all');
     expect(nextLapUnit('all', 5)).toBe(1);
-    expect(nextLapUnit(1, 5)).toBe('segment');
-    expect(nextLapUnit(2, 5)).toBe('segment');
-    expect(nextLapUnit('segment', 5)).toBe('all');
-    // 1回しか繰り返さないなら「1回」と「全体」は同じなので飛ばす
-    expect(nextLapUnit('all', 1)).toBe('segment');
     expect(roundsPerLap(10, 3)).toBe(3);
+  });
+
+  it('以前の「区間ごと」や不正な値は既定（1回ごと）に戻す', () => {
+    expect(normalizeLap('segment')).toBe(1);
+    expect(normalizeLap(undefined)).toBe(1);
+    expect(normalizeLap(0)).toBe(1);
+    expect(normalizeLap('all')).toBe('all');
+    expect(normalizeLap(3)).toBe(3);
   });
 });

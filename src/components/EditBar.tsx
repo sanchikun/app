@@ -35,7 +35,7 @@ interface IntervalProps {
   onToggleKind(i: number): void;
   onRounds(n: number): void;
   onOpenDetail(): void;
-  /** 1周の範囲の表示名（「全体」「1回ごと」「区間ごと」） */
+  /** 1周の範囲の表示名（「1回ごと」「全体」など） */
   lapName: string;
   onCycleLap(): void;
 }

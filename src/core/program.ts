@@ -5,7 +5,7 @@
  * 単発タイマーとインターバルタイマーを同じエンジンで動かす。
  */
 
-import { DEFAULT_LAP, type LapUnit } from './laps';
+import { normalizeLap, type LapUnit } from './laps';
 
 export type StepKind = 'work' | 'rest' | 'prepare';
 
@@ -32,7 +32,7 @@ export interface Program {
   lap?: LapUnit;
 }
 
-export const programLap = (p: Program): LapUnit => p.lap ?? DEFAULT_LAP;
+export const programLap = (p: Program): LapUnit => normalizeLap(p.lap);
 
 /** エンジンが実際に進める1区間 */
 export interface Segment {

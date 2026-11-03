@@ -8,7 +8,7 @@ import { arcPath, C, polar, R_MAIN, R_OUTER, sectorPath, SIZE, STROKE } from './
 interface Props {
   snap: TimerSnapshot;
   style: DialStyle;
-  /** 1周が表す範囲（区間ごと / Nラウンドごと / 全体） */
+  /** 1周が表す範囲（Nラウンドごと / 全体） */
   lap: LapUnit;
   onTap?: () => void;
 }

@@ -17,12 +17,9 @@ interface Props {
   steps: EditorStep[];
   selected: number;
   rounds: number;
-  /**
-   * 1周に含めるラウンド数。0 なら「区間ごと」で、ダイヤルは1ラウンド分を目盛り付きで表示する。
-   * 1以上なら、そのラウンド数ぶんの区間でちょうど1周するように表示する。
-   */
+  /** 1周に含めるラウンド数（インターバル時）。そのラウンド数ぶんの区間でちょうど1周するように表示する */
   lapRounds: number;
-  /** 1周の範囲の表示名（「全体」「1回ごと」など） */
+  /** 1周の範囲の表示名（「1回ごと」「全体」など） */
   lapName: string;
   skipLastRest: boolean;
   /** 準備時間を含むプログラム全体の合計（中央に表示） */
@@ -53,7 +50,7 @@ const HANDLE_HIT = 0.05;
 /** 1周ぶんの扇形を並べる（Nラウンドぶん。最後のラウンドの休憩省略も反映） */
 function buildWedges(steps: EditorStep[], lapRounds: number, totalRounds: number, skipLastRest: boolean): Wedge[] {
   const n = Math.max(1, lapRounds);
-  const includesLast = lapRounds > 0 && n >= totalRounds;
+  const includesLast = n >= totalRounds;
   let lastNonRest = steps.length - 1;
   if (includesLast && skipLastRest) while (lastNonRest > 0 && steps[lastNonRest].kind === 'rest') lastNonRest -= 1;
   const wedges: Wedge[] = [];
@@ -71,9 +68,8 @@ function buildWedges(steps: EditorStep[], lapRounds: number, totalRounds: number
 /**
  * 設定用の円グラフ。
  * - タイマー: 円をなぞる／ハンドルを回すと時間が決まる（キッチンタイマーの要領）。1周の長さは自動で切替
- * - インターバル（1周＝全体 / Nラウンド）: その範囲でちょうど1周。繰り返し部分も扇形で並ぶ。
+ * - インターバル（1周＝Nラウンド / 全体）: その範囲でちょうど1周。繰り返し部分も扇形で並ぶ。
  *   1ラウンド目の各扇形の終わりにあるハンドルを回すと、その区間の長さが全ラウンドで変わる
- * - インターバル（1周＝区間ごと）: 1ラウンドを目盛り付きのダイヤルで表示
  */
 export function DialEditor({
   mode,
@@ -90,7 +86,8 @@ export function DialEditor({
   onCenterTap,
   onDetent,
 }: Props) {
-  const exact = mode === 'interval' && lapRounds > 0;
+  // インターバルは常に「1周＝Nラウンド」でぴったり表示。タイマーは目盛り付き（1周の長さは自動）
+  const exact = mode === 'interval';
   const minScale = mode === 'simple' ? 300 : 60;
   const roundSec = steps.reduce((a, s) => a + s.durationSec, 0);
   const wedges = mode === 'simple' ? buildWedges(steps, 1, 1, false) : buildWedges(steps, lapRounds, rounds, skipLastRest);
