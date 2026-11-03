@@ -28,7 +28,7 @@ export interface Program {
   prepareSec: number;
   /** 最終ラウンドの末尾にある休憩ステップを省略するか */
   skipLastRest: boolean;
-  /** ダイヤル1周が表す範囲（未指定なら全体） */
+  /** ダイヤル1周が表す範囲（未指定なら1ラウンドごと） */
   lap?: LapUnit;
 }
 

@@ -8,7 +8,8 @@ import type { Segment } from './program';
  */
 export type LapUnit = 'segment' | 'all' | number;
 
-export const DEFAULT_LAP: LapUnit = 'all';
+/** 初期値は「1ラウンド（ワーク+休憩）で1周」 */
+export const DEFAULT_LAP: LapUnit = 1;
 
 export interface Lap {
   index: number;

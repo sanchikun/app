@@ -280,8 +280,13 @@ export function App() {
   };
 
   const idle = snap.status === 'idle';
-  const locked = snap.status === 'running' || snap.status === 'paused';
-  const switchMode = (mode: Mode) => updateEditor((e) => ({ ...e, mode }));
+  // 動作中だけはモードを切り替えられない（誤タップで止まらないように）。一時停止中なら切り替えると最初からになる
+  const locked = snap.status === 'running';
+  const switchMode = (mode: Mode) => {
+    if (mode === editorRef.current.mode) return;
+    if (snap.status === 'paused') speech.cancel();
+    updateEditor((e) => ({ ...e, mode }), { force: true });
+  };
   const endAt = new Date(Date.now() + snap.totalRemainingMs);
 
   return (
