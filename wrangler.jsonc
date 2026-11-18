@@ -1,0 +1,22 @@
+{
+  "name": "daytrade-100",
+  "main": "src/worker/index.ts",
+  "compatibility_date": "2026-11-01",
+  "assets": { "directory": "public" },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "daytrade",
+      // `wrangler d1 create daytrade` で発行された ID に置き換える
+      "database_id": "00000000-0000-0000-0000-000000000000"
+    }
+  ],
+  "triggers": {
+    // 平日 9:00〜16:59 JST（UTC 0〜7時）に毎分。遅延データの処理のため大引け後も動かす
+    "crons": ["* 0-7 * * 1-5"]
+  },
+  "vars": {
+    // "yahoo" または "synthetic"（開発用の合成データ）
+    "DATA_SOURCE": "yahoo"
+  }
+}

@@ -1,0 +1,126 @@
+import { hhmmToMinutes, jstMinutes, tickSize } from "./market";
+import { STRATEGIES } from "./strategy";
+import type { Bar, DayState, ExitReason, Settings, Trade } from "./types";
+
+/**
+ * 1日分の売買シミュレーション。バックテストとペーパートレードで同じものを使う。
+ *
+ * 約定モデル:
+ * - シグナルは足の確定時に出て、次の足の始値で成行約定する（先読みなし）。
+ * - 損切りと利確は足の高値・安値で判定する。同じ足で両方に届いた場合は損切りを優先する。
+ * - 損切り時の損失がその日の残りの損失枠に収まるよう、約定時に損切り幅を狭める（窓開けは防げない）。
+ * - 成行（新規・損切り・強制決済）には slippageTicks 分の不利な滑りを加える。利確は指値扱いで滑りなし。
+ */
+
+export function newDay(date: string): DayState {
+  return { date, realizedPnl: 0, tradeCount: 0, halted: null, position: null, pending: null, bars: {} };
+}
+
+function closePosition(
+  state: DayState,
+  s: Settings,
+  t: number,
+  price: number,
+  reason: ExitReason,
+): Trade {
+  const pos = state.position!;
+  const dir = pos.side === "long" ? 1 : -1;
+  const pnl = (price - pos.entryPrice) * dir * pos.shares - 2 * s.commissionPerOrderYen;
+  const trade: Trade = {
+    date: state.date,
+    symbol: pos.symbol,
+    side: pos.side,
+    shares: pos.shares,
+    entryT: pos.entryT,
+    entryPrice: pos.entryPrice,
+    exitT: t,
+    exitPrice: price,
+    pnl,
+    reason,
+  };
+  state.position = null;
+  state.realizedPnl += pnl;
+  state.tradeCount += 1;
+  if (state.realizedPnl >= s.dailyTargetYen) state.halted = "target";
+  else if (state.realizedPnl <= -s.dailyLossLimitYen) state.halted = "loss_limit";
+  else if (state.tradeCount >= s.maxTradesPerDay) state.halted = "max_trades";
+  return trade;
+}
+
+/** 確定した足を1本処理し、その足で決済された取引を返す。state を書き換える。 */
+export function processBar(state: DayState, s: Settings, symbol: string, bar: Bar): Trade[] {
+  const trades: Trade[] = [];
+  const bars = (state.bars[symbol] ??= []);
+  bars.push(bar);
+  const mins = jstMinutes(bar.t);
+  const canEnter = mins < hhmmToMinutes(s.noEntryAfter);
+  const slip = s.slippageTicks * tickSize(bar.o);
+
+  // 1. 前の足で出たシグナルをこの足の始値で約定させる
+  const pending = state.pending;
+  if (pending && pending.symbol === symbol) {
+    state.pending = null;
+    if (!state.position && !state.halted && canEnter) {
+      const dir = pending.side === "long" ? 1 : -1;
+      const fill = bar.o + dir * slip;
+      // 損切り時の損失がその日の残りの損失枠に収まるよう、損切り幅を狭める
+      const tick = tickSize(bar.o);
+      const budget = s.dailyLossLimitYen + state.realizedPnl - 2 * s.commissionPerOrderYen;
+      const maxDist = Math.floor((budget / s.shares - slip) / tick + 1e-9) * tick;
+      const stop = dir === 1 ? Math.max(pending.stop, fill - maxDist) : Math.min(pending.stop, fill + maxDist);
+      // 枠が1ティック分もない、または寄り値がすでに損切り・利確の外側なら見送る
+      const lo = Math.min(stop, pending.target);
+      const hi = Math.max(stop, pending.target);
+      if (maxDist >= tick && fill > lo && fill < hi) {
+        state.position = {
+          symbol,
+          side: pending.side,
+          shares: s.shares,
+          entryT: bar.t,
+          entryPrice: fill,
+          stop,
+          target: pending.target,
+        };
+      }
+    }
+  }
+
+  // 2. 保有中のポジションの決済判定
+  let exited = false;
+  const pos = state.position;
+  if (pos && pos.symbol === symbol) {
+    const long = pos.side === "long";
+    const dir = long ? 1 : -1;
+    const enteredThisBar = pos.entryT === bar.t;
+    if (!enteredThisBar && mins >= hhmmToMinutes(s.forceCloseAt)) {
+      trades.push(closePosition(state, s, bar.t, bar.o - dir * slip, "force_close"));
+    } else if (long ? bar.l <= pos.stop : bar.h >= pos.stop) {
+      // 窓を開けて損切りを飛び越えた場合は始値で約定
+      const base = long ? Math.min(pos.stop, bar.o) : Math.max(pos.stop, bar.o);
+      trades.push(closePosition(state, s, bar.t, base - dir * slip, "stop_loss"));
+    } else if (long ? bar.h >= pos.target : bar.l <= pos.target) {
+      const price = long ? Math.max(pos.target, bar.o) : Math.min(pos.target, bar.o);
+      trades.push(closePosition(state, s, bar.t, price, "take_profit"));
+    }
+    exited = trades.length > 0;
+  }
+
+  // 3. 新しいシグナル（同時に持つのは1ポジションまで）
+  if (!state.position && !state.pending && !state.halted && !exited && canEnter) {
+    const signal = STRATEGIES[s.strategy](bars, s);
+    if (signal) state.pending = { ...signal, symbol };
+  }
+  return trades;
+}
+
+/** 日の終わりに残ったポジションを最後の足の終値で決済する。 */
+export function finishDay(state: DayState, s: Settings): Trade[] {
+  state.pending = null;
+  const pos = state.position;
+  if (!pos) return [];
+  const last = state.bars[pos.symbol]?.at(-1);
+  if (!last) return [];
+  const dir = pos.side === "long" ? 1 : -1;
+  const slip = s.slippageTicks * tickSize(last.c);
+  return [closePosition(state, s, last.t, last.c - dir * slip, "eod")];
+}

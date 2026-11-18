@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>デイトレ +100円</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --text:#1a1d21; --muted:#6b7280; --line:#e3e6ea; --up:#0a7d4b; --down:#c0392b; --accent:#2457d6; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#111418; --card:#1a1e24; --text:#e8eaed; --muted:#9aa3ad; --line:#2c323a; --up:#4cc38a; --down:#f0776a; --accent:#7ea2ff; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:16px; background:var(--bg); color:var(--text); font:15px/1.6 system-ui, -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif; }
+  main { max-width:860px; margin:0 auto; display:grid; grid-template-columns:minmax(0, 1fr); gap:16px; }
+  h1 { font-size:20px; margin:0; }
+  h2 { font-size:15px; margin:0 0 10px; }
+  section { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; }
+  .badge { font-size:12px; padding:2px 8px; border-radius:99px; border:1px solid var(--line); color:var(--muted); margin-left:6px; }
+  .big { font-size:36px; font-weight:700; font-variant-numeric:tabular-nums; }
+  .up { color:var(--up); } .down { color:var(--down); } .muted { color:var(--muted); }
+  .row { display:flex; flex-wrap:wrap; gap:8px 16px; align-items:center; }
+  .scroll { overflow-x:auto; }
+  table { width:100%; border-collapse:collapse; font-variant-numeric:tabular-nums; }
+  th, td { padding:6px 8px; border-bottom:1px solid var(--line); text-align:right; white-space:nowrap; }
+  th:first-child, td:first-child { text-align:left; }
+  th { font-weight:500; color:var(--muted); font-size:13px; }
+  button, select, input { font:inherit; color:inherit; background:var(--card); border:1px solid var(--line); border-radius:6px; padding:6px 10px; }
+  button { cursor:pointer; }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+  label { display:grid; gap:2px; font-size:13px; color:var(--muted); }
+  input { width:9em; }
+  .stats { display:grid; grid-template-columns:repeat(auto-fit, minmax(130px, 1fr)); gap:10px; margin:12px 0; }
+  .stats div { border:1px solid var(--line); border-radius:8px; padding:8px 10px; }
+  .stats b { display:block; font-size:18px; font-variant-numeric:tabular-nums; }
+  #error { color:var(--down); }
+</style>
+</head>
+<body>
+<main>
+  <div class="row">
+    <h1>デイトレ +100円 <span class="badge">ペーパートレード</span><span class="badge" id="source"></span></h1>
+  </div>
+  <div id="error"></div>
+
+  <section>
+    <h2>今日 <span class="muted" id="date"></span></h2>
+    <div class="big" id="pnl">–</div>
+    <div class="row muted">
+      <span id="progress"></span><span id="state"></span>
+    </div>
+    <p id="position" class="muted"></p>
+    <div class="row">
+      <button class="primary" id="toggle">–</button>
+      <label>APIトークン（設定している場合）<input id="token" type="password" autocomplete="off"></label>
+    </div>
+  </section>
+
+  <section>
+    <h2>バックテスト</h2>
+    <form id="bt" class="row">
+      <label>銘柄コード<input name="symbol" value="7203" required></label>
+      <label>戦略<select name="strategy"><option value="orb">寄り付きレンジ突破</option><option value="vwap">VWAP逆張り</option></select></label>
+      <label>足<select name="interval"><option value="5m">5分足 × 60日</option><option value="1m">1分足 × 7日</option></select></label>
+      <label>滑り（ティック）<input name="slippage" type="number" min="0" max="20" value="1"></label>
+      <label>データ<select name="source"><option value="">実データ</option><option value="synthetic">合成（動作確認用）</option></select></label>
+      <button class="primary">実行</button>
+    </form>
+    <div id="btResult"></div>
+  </section>
+
+  <section>
+    <h2>日次損益</h2>
+    <div class="scroll"><table id="daily"></table></div>
+  </section>
+
+  <section>
+    <h2>取引履歴</h2>
+    <div class="scroll"><table id="trades"></table></div>
+  </section>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const yen = (n) => `${n >= 0 ? "+" : "−"}${Math.abs(Math.round(n)).toLocaleString()}円`;
+const cls = (n) => (n > 0 ? "up" : n < 0 ? "down" : "");
+const time = (t) => new Date(t * 1000).toLocaleTimeString("ja-JP", { timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit" });
+const HALT = { target: "目標達成で停止", loss_limit: "損失上限で停止", max_trades: "取引回数の上限で停止" };
+const REASON = { take_profit: "利確", stop_loss: "損切り", force_close: "強制決済", eod: "大引け決済" };
+const SIDE = { long: "買い", short: "売り" };
+
+try { $("token").value = localStorage.getItem("token") ?? ""; } catch {}
+$("token").addEventListener("change", () => { try { localStorage.setItem("token", $("token").value); } catch {} });
+
+async function api(path, method = "GET", body) {
+  const headers = { "Content-Type": "application/json" };
+  if ($("token").value) headers.Authorization = `Bearer ${$("token").value}`;
+  const res = await fetch(path, { method, headers, body: body ? JSON.stringify(body) : undefined });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
+  return json;
+}
+
+function table(el, head, rows, empty) {
+  el.replaceChildren();
+  if (!rows.length) { el.insertRow().insertCell().textContent = empty; return; }
+  const tr = el.createTHead().insertRow();
+  for (const h of head) tr.appendChild(Object.assign(document.createElement("th"), { textContent: h }));
+  const body = el.createTBody();
+  for (const cells of rows) {
+    const r = body.insertRow();
+    for (const c of cells) {
+      const td = r.insertCell();
+      if (Array.isArray(c)) { td.textContent = c[0]; td.className = c[1]; } else td.textContent = c;
+    }
+  }
+}
+
+let enabled = false;
+async function refresh() {
+  try {
+    const [s, d, t] = await Promise.all([api("/api/status"), api("/api/pnl/daily"), api("/api/trades")]);
+    enabled = s.enabled;
+    $("source").textContent = s.dataSource === "synthetic" ? "合成データ" : "約20分遅れ";
+    $("date").textContent = s.date;
+    $("pnl").textContent = yen(s.realizedPnl);
+    $("pnl").className = `big ${cls(s.realizedPnl)}`;
+    $("progress").textContent = `目標 ${yen(s.dailyTargetYen)}・取引 ${s.tradeCount}回`;
+    $("state").textContent = s.halted ? HALT[s.halted] : s.enabled ? "稼働中" : "停止中";
+    $("position").textContent = s.position
+      ? `保有中: ${s.position.symbol} ${SIDE[s.position.side]} ${s.position.shares}株 @${s.position.entryPrice}（損切り ${s.position.stop}／利確 ${s.position.target}）`
+      : "保有なし";
+    $("toggle").textContent = s.enabled ? "停止する" : "開始する";
+    table($("daily"), ["日付", "損益", "取引", "状態"], d.daily.map((r) => [r.date, [yen(r.pnl), cls(r.pnl)], `${r.trades}回`, HALT[r.halted] ?? ""]), "まだ記録がありません");
+    table($("trades"), ["日付", "銘柄", "売買", "新規", "決済", "損益", "理由"],
+      t.trades.map((r) => [r.date, r.symbol, SIDE[r.side], `${time(r.entry_t)} ${r.entry_price}`, `${time(r.exit_t)} ${r.exit_price}`, [yen(r.pnl), cls(r.pnl)], REASON[r.reason]]),
+      "まだ取引がありません");
+    $("error").textContent = "";
+  } catch (e) { $("error").textContent = e.message; }
+}
+
+$("toggle").addEventListener("click", async () => {
+  try { await api(enabled ? "/api/bot/stop" : "/api/bot/start", "POST"); } catch (e) { $("error").textContent = e.message; }
+  refresh();
+});
+
+$("bt").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const f = new FormData(ev.target);
+  const out = $("btResult");
+  out.textContent = "実行中…";
+  try {
+    const interval = f.get("interval");
+    const r = await api("/api/backtest", "POST", {
+      symbol: f.get("symbol"), interval, range: interval === "1m" ? "7d" : "60d",
+      source: f.get("source") || undefined,
+      settings: { strategy: f.get("strategy"), slippageTicks: Number(f.get("slippage")) },
+    });
+    const s = r.summary;
+    const stat = (label, value, c = "") => `<div><span class="muted">${label}</span><b class="${c}">${value}</b></div>`;
+    out.innerHTML = `<div class="stats">
+      ${stat("合計損益", yen(s.totalPnl), cls(s.totalPnl))}
+      ${stat("1日平均", yen(s.avgPnlPerDay), cls(s.avgPnlPerDay))}
+      ${stat("目標達成", `${s.targetDays} / ${s.days}日`)}
+      ${stat("損失上限", `${s.lossLimitDays}日`)}
+      ${stat("取引", `${s.trades}回`)}
+      ${stat("勝率", s.winRate == null ? "–" : `${(s.winRate * 100).toFixed(1)}%`)}
+      ${stat("PF", s.profitFactor == null ? "–" : s.profitFactor.toFixed(2))}
+      ${stat("最大ドローダウン", yen(-s.maxDrawdown), s.maxDrawdown ? "down" : "")}
+    </div>
+    <p class="muted">${r.symbol}・${r.source === "synthetic" ? "合成データ（数字に意味はありません）" : "Yahoo Finance"}・過去の成績は将来の利益を保証しません</p>
+    <div class="scroll"><table id="btDaily"></table></div>`;
+    table($("btDaily"), ["日付", "損益", "取引", "状態"], [...r.daily].reverse().map((d) => [d.date, [yen(d.pnl), cls(d.pnl)], `${d.trades}回`, HALT[d.halted] ?? ""]), "データがありません");
+  } catch (e) { out.textContent = `失敗: ${e.message}`; }
+});
+
+refresh();
+setInterval(refresh, 30000);
+</script>
+</body>
+</html>
