@@ -2,13 +2,14 @@
   "name": "daytrade-100",
   "main": "src/worker/index.ts",
   "compatibility_date": "2026-11-01",
-  "assets": { "directory": "public" },
+  "account_id": "95fee14aec1320eee618963695d2100b",
+  // 画面のHTMLはWorker本体に同梱する
+  "rules": [{ "type": "Text", "globs": ["**/*.html"], "fallthrough": true }],
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "daytrade",
-      // `wrangler d1 create daytrade` で発行された ID に置き換える
-      "database_id": "00000000-0000-0000-0000-000000000000"
+      "database_id": "72af850d-7266-487e-99a0-f873601cd33d"
     }
   ],
   "triggers": {

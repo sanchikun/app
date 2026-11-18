@@ -18,7 +18,7 @@
 | 言語 | TypeScript |
 | API・定期実行 | Cloudflare Workers（Hono、Cron Triggers） |
 | データベース | Cloudflare D1 |
-| 画面 | 静的HTML（Workers の静的アセット） |
+| 画面 | 静的HTML（Worker に同梱） |
 | 株価データ | Yahoo Finance の非公式チャートAPI |
 | テスト | Vitest |
 
@@ -41,7 +41,7 @@ npx wrangler dev --var DATA_SOURCE:synthetic
 ### デプロイ
 
 ```bash
-npx wrangler d1 create daytrade     # 出力された database_id を wrangler.jsonc に書く
+npx wrangler d1 create daytrade     # 出力された database_id と自分の account_id を wrangler.jsonc に書く
 npm run db:migrate:remote
 npx wrangler secret put API_TOKEN   # 更新系APIを保護するトークン（設定を推奨）
 npm run deploy
@@ -116,8 +116,7 @@ npm run backtest -- 7203 --synthetic                      # 合成データ（�
 ```
 src/core/      売買エンジン、戦略、バックテスト、市場の時刻・呼値
 src/data/      株価データの取得（Yahoo、合成）
-src/worker/    API と定期実行、D1 への保存
-public/        画面
+src/worker/    API と定期実行、D1 への保存、画面（index.html）
 scripts/       コマンドライン用バックテスト
 migrations/    D1 のスキーマ
 test/          テスト

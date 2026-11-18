@@ -4,6 +4,7 @@ import { jstDate } from "../core/market";
 import { normalizeSymbol, parseSettings } from "../core/types";
 import { INTERVAL_SECONDS, RANGES, getProvider } from "../data/provider";
 import type { Interval, Range } from "../data/provider";
+import page from "./index.html";
 import { getDay, getSettings, paperTick, saveSettings } from "./paper";
 
 interface Env {
@@ -36,6 +37,8 @@ async function jsonBody(req: Request): Promise<Record<string, unknown>> {
     return {};
   }
 }
+
+app.get("/", (c) => c.html(page));
 
 app.get("/api/status", async (c) => {
   const date = jstDate(Date.now() / 1000);
