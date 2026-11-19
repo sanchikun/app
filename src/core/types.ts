@@ -9,7 +9,7 @@ export interface Bar {
 }
 
 export type Side = "long" | "short";
-export const STRATEGY_NAMES = ["orb", "vwap", "momentum", "gapfade", "pullback"] as const;
+export const STRATEGY_NAMES = ["orb", "vwap", "momentum", "gapfade", "pullback", "gapopen"] as const;
 export type StrategyName = (typeof STRATEGY_NAMES)[number];
 export type EntryOrder = "market" | "limit";
 export type HaltReason = "target" | "loss_limit" | "max_trades";
@@ -52,7 +52,14 @@ export interface Settings {
   momMinPct: number;
   /** ギャップ埋め: 前日終値からのギャップ（%）がこれ以上のときだけ入る */
   gapMinPct: number;
+  /** 安寄り買い: 寄り付きの値からこの%下げたら損切りする */
+  gapStopPct: number;
+  /** 安寄り買い: 1回の買付金額（株価×株数）がこれを超える銘柄は見送る。0 なら上限なし */
+  maxPositionYen: number;
 }
+
+/** 対象銘柄の上限。1回の定期実行で銘柄ごとに1回ずつ株価を取りにいく */
+export const MAX_SYMBOLS = 20;
 
 export const DEFAULT_SETTINGS: Settings = {
   enabled: false,
@@ -76,6 +83,8 @@ export const DEFAULT_SETTINGS: Settings = {
   vwapMinBars: 12,
   momMinPct: 0.5,
   gapMinPct: 1,
+  gapStopPct: 0.5,
+  maxPositionYen: 0,
 };
 
 export interface Signal {
@@ -118,6 +127,8 @@ export interface DayState {
   bars: Record<string, Bar[]>;
   /** 銘柄ごとの前営業日の終値（ギャップを見る戦略が使う） */
   prevClose?: Record<string, number>;
+  /** 安寄り買いで、その日の寄り付きを見て入るかどうかを決め終えた銘柄 */
+  decided?: string[];
 }
 
 function isHHMM(v: unknown): v is string {
@@ -163,6 +174,8 @@ export function parseSettings(input: unknown, base: Settings = DEFAULT_SETTINGS)
   num("vwapMinBars", 5, 200, true);
   num("momMinPct", 0, 20);
   num("gapMinPct", 0.1, 20);
+  num("gapStopPct", 0.1, 10);
+  num("maxPositionYen", 0, 1e9);
   time("noEntryAfter");
   time("forceCloseAt");
   if ("strategy" in src) {
@@ -175,8 +188,8 @@ export function parseSettings(input: unknown, base: Settings = DEFAULT_SETTINGS)
   }
   if ("symbols" in src) {
     const v = src.symbols;
-    if (!Array.isArray(v) || v.length < 1 || v.length > 5 || !v.every((s) => typeof s === "string")) {
-      throw new Error("symbols must be an array of 1-5 strings");
+    if (!Array.isArray(v) || v.length < 1 || v.length > MAX_SYMBOLS || !v.every((s) => typeof s === "string")) {
+      throw new Error(`symbols must be an array of 1-${MAX_SYMBOLS} strings`);
     }
     out.symbols = (v as string[]).map(normalizeSymbol);
   }

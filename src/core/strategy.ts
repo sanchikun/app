@@ -159,4 +159,7 @@ export const pullback: Strategy = (bars, s, fine = false) => {
   return { side: "long", stop, target: roundToTick(high, "down", fine) };
 };
 
-export const STRATEGIES: Record<Settings["strategy"], Strategy> = { orb, vwap, momentum, gapfade, pullback };
+/** 安寄り買いは寄り付きの板寄せの値で入るので、分足のエンジンではなく gapopen.ts が日足の値で動かす */
+const gapopen: Strategy = () => null;
+
+export const STRATEGIES: Record<Settings["strategy"], Strategy> = { orb, vwap, momentum, gapfade, pullback, gapopen };

@@ -6,8 +6,10 @@
  */
 import { runBacktest } from "../src/core/backtest";
 import { DEFAULT_SETTINGS, normalizeSymbol, parseSettings } from "../src/core/types";
+import { runGapOpenBacktest } from "../src/core/gapopen";
 import { getProvider } from "../src/data/provider";
 import type { Interval, Range } from "../src/data/provider";
+import { DEFAULT_SYMBOLS, loadDaily } from "./universe";
 
 const args = process.argv.slice(2);
 const flag = (name: string) => {
@@ -16,7 +18,7 @@ const flag = (name: string) => {
 };
 const symbolArg = args[0];
 if (!symbolArg || symbolArg.startsWith("--")) {
-  console.error("usage: npm run backtest -- <symbol> [--interval 5m] [--range 60d] [--strategy orb|vwap|momentum|gapfade|pullback] [--slippage n] [--entry market|limit] [--limit-wait n] [--allow-short] [--synthetic]");
+  console.error("usage: npm run backtest -- <symbol> [--interval 5m] [--range 60d] [--strategy orb|vwap|momentum|gapfade|pullback|gapopen] [--slippage n] [--entry market|limit] [--limit-wait n] [--allow-short] [--synthetic]");
   process.exit(1);
 }
 
@@ -34,6 +36,36 @@ if (args.includes("--allow-short")) overrides.allowShort = true;
 if (args.includes("--fine-tick")) overrides.fineTickSymbols = [args[0]];
 if (args.includes("--standard-tick")) overrides.fineTickSymbols = [];
 
+if (flag("gap-stop")) overrides.gapStopPct = Number(flag("gap-stop"));
+if (flag("shares")) overrides.shares = Number(flag("shares"));
+if (flag("max-position")) overrides.maxPositionYen = Number(flag("max-position"));
+const yen = (n: number) => `${n >= 0 ? "+" : ""}${Math.round(n)}円`;
+
+if (flag("strategy") === "gapopen") {
+  // 安寄り買いは日足で検証する。銘柄はカンマ区切りで複数、または all（既定の銘柄リスト）を指定できる
+  const list = (symbolArg === "all" ? DEFAULT_SYMBOLS : symbolArg.split(",")).map((x: string) => normalizeSymbol(x.trim()));
+  if (!args.includes("--standard-tick")) overrides.fineTickSymbols = list;
+  const s = { ...parseSettings(overrides, DEFAULT_SETTINGS), symbols: list };
+  const range = flag("range") ?? "10y";
+  const data = await loadDaily(list, range, flag("cache"));
+  const result = runGapOpenBacktest(data, s);
+  const m = result.summary;
+  console.log(`${result.symbol}  安寄り買い（${s.gapMinPct}%以上安く寄ったら寄りで買い、${s.gapStopPct}%で損切り、引けで売り）  日足 × ${range}  ${s.shares}株  損失上限 ${s.dailyLossLimitYen}円${s.maxPositionYen > 0 ? `  買付上限 ${s.maxPositionYen}円` : ""}`);
+  console.log(`日数 ${m.days}  合計 ${yen(m.totalPnl)}  1日平均 ${yen(m.avgPnlPerDay)}  勝ち ${m.winDays}日  負け ${m.loseDays}日  取引なし・±0 ${m.flatDays}日`);
+  console.log(`取引 ${m.trades}回  勝率 ${m.winRate == null ? "-" : `${(m.winRate * 100).toFixed(1)}%`}  PF ${m.profitFactor == null ? "-" : m.profitFactor.toFixed(2)}  最大DD ${yen(-m.maxDrawdown)}  最悪日 ${yen(m.worstDay)}  最良日 ${yen(m.bestDay)}`);
+  const plus = result.monthly.filter((x) => x.pnl > 0).length;
+  const worstMonth = Math.min(...result.monthly.map((x) => x.pnl));
+  console.log(`月 ${result.monthly.length}  プラスの月 ${plus}（${((plus / Math.max(result.monthly.length, 1)) * 100).toFixed(1)}%）  月平均 ${yen(m.totalPnl / Math.max(result.monthly.length, 1))}  最悪の月 ${yen(worstMonth)}`);
+  const years = new Map<string, { pnl: number; trades: number; plus: number; months: number }>();
+  for (const x of result.monthly) {
+    const y = years.get(x.month.slice(0, 4)) ?? { pnl: 0, trades: 0, plus: 0, months: 0 };
+    years.set(x.month.slice(0, 4), { pnl: y.pnl + x.pnl, trades: y.trades + x.trades, plus: y.plus + (x.pnl > 0 ? 1 : 0), months: y.months + 1 });
+  }
+  for (const [y, v] of years) console.log(`  ${y}  ${yen(v.pnl).padStart(10)}  ${String(v.trades).padStart(4)}回  プラスの月 ${v.plus}/${v.months}`);
+  if (args.includes("--monthly")) for (const x of result.monthly) console.log(`  ${x.month}  ${yen(x.pnl).padStart(9)}  ${x.days}日  ${x.trades}回`);
+  process.exit(0);
+}
+
 const symbol = normalizeSymbol(symbolArg);
 const settings = parseSettings(overrides, DEFAULT_SETTINGS);
 const synthetic = args.includes("--synthetic");
@@ -43,8 +75,6 @@ const range = (flag("range") ?? "60d") as Range;
 const bars = await getProvider(synthetic ? "synthetic" : "yahoo").intraday(symbol, interval, range, Math.floor(Date.now() / 1000));
 const result = runBacktest(symbol, bars, settings);
 const s = result.summary;
-const yen = (n: number) => `${n >= 0 ? "+" : ""}${Math.round(n)}円`;
-
 console.log(`${symbol}  ${settings.strategy}${settings.entryOrder === "limit" ? `（指値・${settings.limitWaitBars}本待ち）` : ""}  ${interval} × ${range}  ${synthetic ? "【合成データ】" : "Yahoo Finance"}`);
 console.log(`日数 ${s.days}  合計 ${yen(s.totalPnl)}  1日平均 ${yen(s.avgPnlPerDay)}`);
 console.log(`目標達成 ${s.targetDays}日  損失上限 ${s.lossLimitDays}日  勝ち ${s.winDays}日  負け ${s.loseDays}日  取引なし・±0 ${s.flatDays}日`);

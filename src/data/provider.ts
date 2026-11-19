@@ -12,6 +12,8 @@ export type Range = (typeof RANGES)[number];
 export interface DataProvider {
   /** now（UNIX秒）時点で取得できる足を時刻順に返す */
   intraday(symbol: string, interval: Interval, range: Range, now: number): Promise<Bar[]>;
+  /** 日足を日付順に返す。取引中の当日の足（ここまでの始値・高値・安値・現在値）も含む */
+  daily(symbol: string, range: string, now: number): Promise<DailyBar[]>;
 }
 
 interface YahooChart {
@@ -56,6 +58,7 @@ export const yahoo: DataProvider = {
     // 末尾に付く「現在値」の足（時刻が足の境界に乗らない）を除く
     return parseYahooChart(await res.json()).filter((b) => b.t % step === 0);
   },
+  daily: (symbol, range) => yahooDaily(symbol, range),
 };
 
 interface YahooDailyChart {
@@ -153,7 +156,26 @@ export const synthetic: DataProvider = {
     }
     return bars;
   },
+  daily: async () => [],
 };
+
+/** 分足を日ごとにまとめて日足にする */
+export function toDaily(bars: Bar[]): DailyBar[] {
+  const days = new Map<string, DailyBar>();
+  for (const b of bars) {
+    const date = jstDate(b.t);
+    const d = days.get(date);
+    if (!d) days.set(date, { date, o: b.o, h: b.h, l: b.l, c: b.c });
+    else {
+      d.h = Math.max(d.h, b.h);
+      d.l = Math.min(d.l, b.l);
+      d.c = b.c;
+    }
+  }
+  return [...days.values()].sort((a, b) => a.date.localeCompare(b.date));
+}
+
+synthetic.daily = async (symbol, _range, now) => toDaily(await synthetic.intraday(symbol, "5m", "60d", now));
 
 export function getProvider(name: string | undefined): DataProvider {
   return name === "synthetic" ? synthetic : yahoo;

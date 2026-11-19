@@ -302,3 +302,66 @@ describe("追加の戦略", () => {
     expect(runBacktest(SYM, bars.slice(1), s).trades).toHaveLength(0);
   });
 });
+
+describe("安寄り買い", async () => {
+  const { gapOpenTick, openQuote, runGapOpenBacktest, jstTime } = await import("../src/core/gapopen");
+  const G: Settings = { ...DEFAULT_SETTINGS, strategy: "gapopen", fineTickSymbols: [], slippageTicks: 1, gapMinPct: 1, gapStopPct: 0.5, dailyLossLimitYen: 3000, symbols: ["1111.T", "2222.T"] };
+  const NOW = OPEN + 3600;
+  const q = (open: number, low: number, close: number) => ({ prevClose: 2000, open, low, close });
+
+  it("1%以上安く寄った銘柄を寄り値で買い、0.5%下に損切りを置く", () => {
+    const state = newDay("2026-11-18");
+    expect(gapOpenTick(state, G, { "1111.T": q(1970, 1965, 1968) }, NOW, false)).toHaveLength(0);
+    expect(state.position).toMatchObject({ symbol: "1111.T", entryPrice: 1970, stop: 1960, entryT: OPEN });
+    expect(state.decided).toEqual(["1111.T"]);
+  });
+
+  it("ギャップが足りない銘柄は見送り、あとから入り直さない", () => {
+    const state = newDay("2026-11-18");
+    gapOpenTick(state, G, { "1111.T": q(1990, 1985, 1990) }, NOW, false);
+    gapOpenTick(state, G, { "1111.T": q(1970, 1965, 1968) }, NOW, false);
+    expect(state.position).toBeNull();
+  });
+
+  it("安値が損切りに届けば1ティック滑って決済し、届かなければ大引けの終値で決済する", () => {
+    const stopped = newDay("2026-11-18");
+    gapOpenTick(stopped, G, { "1111.T": q(1970, 1970, 1970) }, NOW, false);
+    expect(gapOpenTick(stopped, G, { "1111.T": q(1970, 1955, 1990) }, NOW, false)).toMatchObject([{ exitPrice: 1959, reason: "stop_loss", pnl: -1100, exitT: NOW }]);
+    const held = newDay("2026-11-18");
+    expect(gapOpenTick(held, G, { "1111.T": q(1970, 1962, 1995) }, NOW, true)).toMatchObject([{ exitPrice: 1995, reason: "eod", pnl: 2500, exitT: jstTime("2026-11-18", 930) }]);
+  });
+
+  it("複数が条件に合えばギャップが最も大きい銘柄だけを買い、買付上限を超える銘柄は見送る", () => {
+    const state = newDay("2026-11-18");
+    gapOpenTick(state, G, { "1111.T": q(1975, 1975, 1975), "2222.T": q(1950, 1950, 1950) }, NOW, false);
+    expect(state.position?.symbol).toBe("2222.T");
+    const capped = newDay("2026-11-18");
+    gapOpenTick(capped, { ...G, maxPositionYen: 196000 }, { "1111.T": q(1975, 1975, 1975), "2222.T": q(1950, 1950, 1950) }, NOW, false);
+    expect(capped.position?.symbol).toBe("2222.T");
+    const none = newDay("2026-11-18");
+    gapOpenTick(none, { ...G, maxPositionYen: 190000 }, { "1111.T": q(1975, 1975, 1975) }, NOW, false);
+    expect(none.position).toBeNull();
+  });
+
+  it("損切り幅は損失上限に収まるよう狭める", () => {
+    const state = newDay("2026-11-18");
+    gapOpenTick(state, { ...G, dailyLossLimitYen: 600 }, { "1111.T": q(1970, 1970, 1970) }, NOW, false);
+    expect(state.position?.stop).toBe(1965);
+  });
+
+  it("日足のバックテスト: 配当落ちを調整し、日ごとに1回だけ取引する", () => {
+    const bars = [
+      { date: "2026-11-02", o: 2000, h: 2000, l: 2000, c: 2000 },
+      { date: "2026-11-04", o: 1970, h: 1996, l: 1965, c: 1995 },
+      { date: "2026-11-05", o: 1970, h: 1975, l: 1950, c: 1960, dividend: 20 },
+      { date: "2026-11-06", o: 1930, h: 1940, l: 1900, c: 1935 },
+    ];
+    expect(openQuote(bars, 2)).toMatchObject({ prevClose: 1975 });
+    const r = runGapOpenBacktest([["1111.T", bars]], G);
+    expect(r.trades.map((t) => [t.date, t.reason, t.pnl])).toEqual([
+      ["2026-11-04", "eod", 2500],
+      ["2026-11-06", "stop_loss", -1100],
+    ]);
+    expect(r.summary).toMatchObject({ days: 3, trades: 2, totalPnl: 1400 });
+  });
+});

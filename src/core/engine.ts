@@ -20,7 +20,8 @@ export function newDay(date: string): DayState {
   return { date, realizedPnl: 0, tradeCount: 0, halted: null, position: null, pending: null, bars: {} };
 }
 
-function closePosition(
+/** 保有中のポジションを決済し、その日の損益と停止状態を更新する */
+export function closePosition(
   state: DayState,
   s: Settings,
   t: number,

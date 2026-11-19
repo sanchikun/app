@@ -1,4 +1,6 @@
-import { finishDay, newDay, processBar } from "../core/engine";
+import { closePosition, finishDay, newDay, processBar } from "../core/engine";
+import { gapOpenTick, jstTime, openQuote } from "../core/gapopen";
+import type { OpenQuote } from "../core/gapopen";
 import { SESSION_CLOSE, inSession, jstDate, jstMinutes } from "../core/market";
 import { DEFAULT_SETTINGS, parseSettings } from "../core/types";
 import type { Bar, DayState, Settings, Trade } from "../core/types";
@@ -59,6 +61,8 @@ export async function paperTick(db: D1Database, provider: DataProvider, now: num
   const settings = await getSettings(db);
   if (!settings.enabled) return { date, skipped: "disabled", processedBars: 0, trades: [], errors: [] };
 
+  if (settings.strategy === "gapopen") return gapOpenPaperTick(db, provider, settings, now);
+
   const statements: D1PreparedStatement[] = [];
   let state = await getDay(db, date);
   if (!state) {
@@ -106,4 +110,61 @@ export async function paperTick(db: D1Database, provider: DataProvider, now: num
   if (queue.length > 0 || trades.length > 0) statements.push(...saveStatements(db, state, trades));
   if (statements.length > 0) await db.batch(statements);
   return { date, processedBars: queue.length, trades, errors };
+}
+
+/**
+ * 安寄り買いのペーパートレード。寄り付きと大引けの値が分足にないので、日足（取引中の当日の足を含む）で動かす。
+ * 寄り付いた銘柄から順に入るかどうかを決め、保有中は安値で損切りを、大引け後は終値での決済を判定する。
+ */
+async function gapOpenPaperTick(db: D1Database, provider: DataProvider, settings: Settings, now: number): Promise<TickResult> {
+  const date = jstDate(now);
+  const statements: D1PreparedStatement[] = [];
+  const errors: string[] = [];
+  let state = await getDay(db, date);
+  if (!state) {
+    state = newDay(date);
+    // 前営業日のポジションが残っていたら（大引け後の処理が動かなかった場合）、その日の日足で決済する
+    const prev = await db
+      .prepare("SELECT state_json FROM days WHERE date < ? ORDER BY date DESC LIMIT 1")
+      .bind(date)
+      .first<{ state_json: string }>();
+    const prevState = prev ? (JSON.parse(prev.state_json) as DayState) : null;
+    const pos = prevState?.position;
+    if (prevState && pos) {
+      try {
+        const bar = (await provider.daily(pos.symbol, "1mo", now)).find((b) => b.date === prevState.date);
+        if (!bar) throw new Error(`${prevState.date} の日足がありません`);
+        const stopped = bar.l <= pos.stop;
+        const closed = closePosition(prevState, settings, jstTime(prevState.date, SESSION_CLOSE), stopped ? pos.stop : bar.c, stopped ? "stop_loss" : "eod");
+        statements.push(...saveStatements(db, prevState, [closed]));
+      } catch (e) {
+        errors.push(`${pos.symbol}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+  }
+
+  // 大引けから30分以上たてば、遅延データでも終値が確定している
+  const dayComplete = jstMinutes(now) >= SESSION_CLOSE + 30;
+  const decided = state.decided ?? [];
+  const wanted = new Set(settings.symbols.filter((sym) => !decided.includes(sym)));
+  if (state.position) wanted.add(state.position.symbol);
+  const quotes: Record<string, OpenQuote> = {};
+  for (const symbol of wanted) {
+    try {
+      const bars = await provider.daily(symbol, "5d", now);
+      const i = bars.findIndex((b) => b.date === date);
+      const q = i >= 1 ? openQuote(bars, i) : null;
+      if (q) quotes[symbol] = q;
+    } catch (e) {
+      errors.push(`${symbol}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  const before = decided.length;
+  const hadPosition = state.position != null;
+  const trades = gapOpenTick(state, settings, quotes, now, dayComplete);
+  const changed = trades.length > 0 || (state.decided?.length ?? 0) !== before || (state.position != null) !== hadPosition;
+  if (changed) statements.push(...saveStatements(db, state, trades));
+  if (statements.length > 0) await db.batch(statements);
+  return { date, processedBars: Object.keys(quotes).length, trades, errors };
 }

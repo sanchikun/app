@@ -79,6 +79,11 @@ export function runBacktest(symbol: string, bars: Bar[], settings: Settings): Ba
     daily.push({ date, pnl: state.realizedPnl, trades: state.tradeCount, halted: state.halted });
   }
 
+  return { symbol, summary: summarizeDays(daily, trades), fineTick: fine, tickMismatch: tickMismatchRate(bars, fine) > 0.2, missingOpenDays, monthly: monthly(daily), daily, trades };
+}
+
+/** 日次の結果と取引から、合計・勝率・PF・最大ドローダウンなどをまとめる */
+export function summarizeDays(daily: DayResult[], trades: Trade[]): BacktestResult["summary"] {
   const totalPnl = daily.reduce((a, d) => a + d.pnl, 0);
   const grossWin = trades.filter((t) => t.pnl > 0).reduce((a, t) => a + t.pnl, 0);
   const grossLoss = trades.filter((t) => t.pnl < 0).reduce((a, t) => a - t.pnl, 0);
@@ -93,28 +98,19 @@ export function runBacktest(symbol: string, bars: Bar[], settings: Settings): Ba
   const pnls = daily.map((d) => d.pnl);
 
   return {
-    symbol,
-    summary: {
-      days: daily.length,
-      totalPnl,
-      avgPnlPerDay: daily.length ? totalPnl / daily.length : 0,
-      targetDays: daily.filter((d) => d.halted === "target").length,
-      lossLimitDays: daily.filter((d) => d.halted === "loss_limit").length,
-      winDays: daily.filter((d) => d.pnl > 0).length,
-      loseDays: daily.filter((d) => d.pnl < 0).length,
-      flatDays: daily.filter((d) => d.pnl === 0).length,
-      trades: trades.length,
-      winRate: trades.length ? trades.filter((t) => t.pnl > 0).length / trades.length : null,
-      profitFactor: grossLoss > 0 ? grossWin / grossLoss : null,
-      maxDrawdown,
-      worstDay: pnls.length ? Math.min(...pnls) : 0,
-      bestDay: pnls.length ? Math.max(...pnls) : 0,
-    },
-    fineTick: fine,
-    tickMismatch: tickMismatchRate(bars, fine) > 0.2,
-    missingOpenDays,
-    monthly: monthly(daily),
-    daily,
-    trades,
-  };
+    days: daily.length,
+    totalPnl,
+    avgPnlPerDay: daily.length ? totalPnl / daily.length : 0,
+    targetDays: daily.filter((d) => d.halted === "target").length,
+    lossLimitDays: daily.filter((d) => d.halted === "loss_limit").length,
+    winDays: daily.filter((d) => d.pnl > 0).length,
+    loseDays: daily.filter((d) => d.pnl < 0).length,
+    flatDays: daily.filter((d) => d.pnl === 0).length,
+    trades: trades.length,
+    winRate: trades.length ? trades.filter((t) => t.pnl > 0).length / trades.length : null,
+    profitFactor: grossLoss > 0 ? grossWin / grossLoss : null,
+    maxDrawdown,
+    worstDay: pnls.length ? Math.min(...pnls) : 0,
+    bestDay: pnls.length ? Math.max(...pnls) : 0,
+    };
 }
