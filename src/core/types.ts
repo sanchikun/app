@@ -56,10 +56,18 @@ export interface Settings {
   gapStopPct: number;
   /** 安寄り買い: 1回の買付金額（株価×株数）がこれを超える銘柄は見送る。0 なら上限なし */
   maxPositionYen: number;
+  /** 安寄り買い: 前日の終値が前々日よりこの%以上下げていた銘柄だけを買う（2日続けての下げ）。0 なら見ない */
+  gapPrevDropPct: number;
   /** 持ち越し: 場中（始値から終値）の上げがこの%以上の銘柄を大引けで買う */
   overnightMinPct: number;
   /** 持ち越し: 1回の買付金額の上限。損切りを置けないので小さめにする。0 なら maxPositionYen と同じ */
   overnightMaxPositionYen: number;
+  /** 持ち越し: 1回の株数（ETF は口数）。0 なら shares と同じ */
+  overnightShares: number;
+  /** 持ち越し: 大引けで買う曜日（1 = 月曜 … 5 = 金曜）。空ならどの曜日でも買う */
+  overnightWeekdays: number[];
+  /** 持ち越し: 対象銘柄（ETF など）。空なら symbols と同じ。ここだけにある銘柄は安寄り買いの対象にしない */
+  overnightSymbols: string[];
 }
 
 /** 対象銘柄の上限。1回の定期実行で銘柄ごとに1回ずつ株価を取りにいく */
@@ -91,6 +99,10 @@ export const DEFAULT_SETTINGS: Settings = {
   maxPositionYen: 0,
   overnightMinPct: 2,
   overnightMaxPositionYen: 0,
+  gapPrevDropPct: 0,
+  overnightShares: 0,
+  overnightWeekdays: [],
+  overnightSymbols: [],
 };
 
 export interface Signal {
@@ -186,8 +198,10 @@ export function parseSettings(input: unknown, base: Settings = DEFAULT_SETTINGS)
   num("gapMinPct", 0.1, 20);
   num("gapStopPct", 0.1, 10);
   num("maxPositionYen", 0, 1e9);
-  num("overnightMinPct", 0, 20);
+  num("gapPrevDropPct", 0, 20);
+  num("overnightMinPct", -100, 20);
   num("overnightMaxPositionYen", 0, 1e9);
+  num("overnightShares", 0, 100000, true);
   time("noEntryAfter");
   time("forceCloseAt");
   if ("strategy" in src) {
@@ -204,6 +218,18 @@ export function parseSettings(input: unknown, base: Settings = DEFAULT_SETTINGS)
       throw new Error(`symbols must be an array of 1-${MAX_SYMBOLS} strings`);
     }
     out.symbols = (v as string[]).map(normalizeSymbol);
+  }
+  if ("overnightSymbols" in src) {
+    const v = src.overnightSymbols;
+    if (!Array.isArray(v) || v.length > MAX_SYMBOLS || !v.every((s) => typeof s === "string")) {
+      throw new Error(`overnightSymbols must be an array of up to ${MAX_SYMBOLS} strings`);
+    }
+    out.overnightSymbols = (v as string[]).map(normalizeSymbol);
+  }
+  if ("overnightWeekdays" in src) {
+    const v = src.overnightWeekdays;
+    if (!Array.isArray(v) || !v.every((d) => Number.isInteger(d) && d >= 1 && d <= 5)) throw new Error("overnightWeekdays must be an array of 1-5 (Mon-Fri)");
+    out.overnightWeekdays = [...new Set(v as number[])].sort();
   }
   if ("fineTickSymbols" in src) {
     const v = src.fineTickSymbols;

@@ -316,6 +316,21 @@ describe("安寄り買い", async () => {
     expect(state.decided).toEqual(["1111.T"]);
   });
 
+  it("gapPrevDropPct があれば、前日もそれ以上下げていた銘柄だけを買う", () => {
+    const P = { ...G, gapPrevDropPct: 2 };
+    const state = newDay("2026-11-18");
+    // 1111 はギャップが大きいが前日は上げ、2222 は前日 -2.5%、3333 は前日の騰落が分からない
+    gapOpenTick(state, P, { "1111.T": { ...q(1940, 1940, 1940), prevReturnPct: 1 }, "2222.T": { ...q(1970, 1965, 1968), prevReturnPct: -2.5 } }, NOW, false);
+    expect(state.position?.symbol).toBe("2222.T");
+    const unknown = newDay("2026-11-18");
+    gapOpenTick(unknown, P, { "1111.T": q(1940, 1940, 1940) }, NOW, false);
+    expect(unknown.position).toBeNull();
+    // 日足から前日の騰落率を出す（権利落ち調整込み）
+    const bars = [{ date: "d1", o: 1000, h: 1000, l: 1000, c: 1000 }, { date: "d2", o: 990, h: 990, l: 970, c: 970 }, { date: "d3", o: 955, h: 960, l: 950, c: 958 }];
+    expect(openQuote(bars, 2)?.prevReturnPct).toBeCloseTo(-3);
+    expect(openQuote(bars, 1)?.prevReturnPct).toBeUndefined();
+  });
+
   it("ギャップが足りない銘柄は見送り、あとから入り直さない", () => {
     const state = newDay("2026-11-18");
     gapOpenTick(state, G, { "1111.T": q(1990, 1985, 1990) }, NOW, false);
@@ -383,6 +398,23 @@ describe("上げた日の持ち越し", async () => {
     expect(state.position?.symbol).toBe("2222.T");
   });
 
+  it("overnightWeekdays の曜日だけ買い、overnightSymbols の銘柄は持ち越しだけの対象にする", () => {
+    const E: Settings = { ...O, overnightMinPct: -100, overnightWeekdays: [1], overnightSymbols: ["1306.T"] };
+    // 1306 は1%以上安く寄っているが、安寄り買いの対象ではない
+    const quotes = { "1306.T": q(400, 395, 394, 396), "1111.T": q(2000, 2000, 1995, 2050) };
+    const wed = newDay("2026-11-18");
+    expect(dailyTick(wed, E, quotes, OPEN, true)).toHaveLength(0);
+    expect(wed.position).toBeNull();
+    const mon = newDay("2026-11-16");
+    expect(dailyTick(mon, E, quotes, OPEN, true)).toHaveLength(0);
+    expect(mon.position).toMatchObject({ symbol: "1306.T", entryPrice: 396, overnight: true, shares: 100 });
+    const lots = newDay("2026-11-16");
+    dailyTick(lots, { ...E, overnightShares: 700 }, quotes, OPEN, true);
+    expect(lots.position?.shares).toBe(700);
+    expect(() => parseSettings({ overnightWeekdays: [6] }, DEFAULT_SETTINGS)).toThrow();
+    expect(parseSettings({ overnightSymbols: ["1306"], overnightWeekdays: [1, 1] }, DEFAULT_SETTINGS)).toMatchObject({ overnightSymbols: ["1306.T"], overnightWeekdays: [1] });
+  });
+
   it("買付上限を超える銘柄は見送り、条件に合う銘柄がなければ買わない", () => {
     const capped = newDay("2026-11-18");
     dailyTick(capped, { ...O, overnightMaxPositionYen: 150000 }, { "1111.T": q(2000, 2000, 1995, 2050), "2222.T": q(1000, 1000, 1000, 1030) }, OPEN, true);
@@ -415,5 +447,18 @@ describe("上げた日の持ち越し", async () => {
     const r = runGapOpenBacktest([["1111.T", bars]], { ...O, strategy: "overnight" });
     expect(r.trades.map((t) => [t.date, t.reason, t.entryPrice, t.exitPrice, t.pnl])).toEqual([["2026-11-05", "next_open", 1030, 1042, 1200]]);
     expect(r.daily.map((d) => d.pnl)).toEqual([0, 1200, 0]);
+  });
+
+  it("日足のバックテスト: 持ち越した翌日の足が壊れていたら、その取引は数えない", () => {
+    const bars = [
+      { date: "2026-11-02", o: 1000, h: 1000, l: 1000, c: 1000 },
+      { date: "2026-11-04", o: 1000, h: 1032, l: 998, c: 1030 },
+      // 桁が1つずれた日
+      { date: "2026-11-05", o: 104, h: 105, l: 103, c: 104 },
+      { date: "2026-11-06", o: 1040, h: 1041, l: 1039, c: 1040 },
+      { date: "2026-11-09", o: 1040, h: 1041, l: 1039, c: 1040 },
+    ];
+    const r = runGapOpenBacktest([["1111.T", bars]], { ...O, strategy: "overnight" });
+    expect(r.trades).toHaveLength(0);
   });
 });

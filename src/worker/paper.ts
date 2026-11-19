@@ -1,5 +1,5 @@
 import { closePosition, finishDay, newDay, processBar } from "../core/engine";
-import { dailyTick, isDailyStrategy, jstTime, openQuote, runsGapOpen, runsOvernight } from "../core/gapopen";
+import { dailyTick, isDailyStrategy, jstTime, openQuote, overnightSymbols, runsGapOpen, runsOvernight } from "../core/gapopen";
 import type { OpenQuote } from "../core/gapopen";
 import { SESSION_CLOSE, inSession, jstDate, jstMinutes } from "../core/market";
 import { DEFAULT_SETTINGS, parseSettings } from "../core/types";
@@ -155,7 +155,7 @@ async function dailyPaperTick(db: D1Database, provider: DataProvider, settings: 
   const decided = state.decided ?? [];
   const wanted = new Set<string>();
   if (runsGapOpen(settings)) for (const sym of settings.symbols) if (!decided.includes(sym)) wanted.add(sym);
-  if (runsOvernight(settings) && dayComplete && !state.overnightDecided) for (const sym of settings.symbols) wanted.add(sym);
+  if (runsOvernight(settings) && dayComplete && !state.overnightDecided) for (const sym of overnightSymbols(settings)) wanted.add(sym);
   if (state.position) wanted.add(state.position.symbol);
   const quotes: Record<string, OpenQuote> = {};
   for (const symbol of wanted) {

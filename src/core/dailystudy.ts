@@ -85,6 +85,8 @@ export const DAILY_RULES: DailyRule[] = [
   { key: "all-short", label: "毎日（比較用）", side: "short", entry: () => "open" },
   { key: "gap-down", label: "1%以上安く寄った", side: "long", entry: (c) => (c.gapPct <= -1 ? "open" : null) },
   { key: "gap-up", label: "1%以上高く寄った", side: "short", entry: (c) => (c.gapPct >= 1 ? "open" : null) },
+  { key: "gap-down-after-drop", label: "前日2%以上下げ、さらに1%以上安く寄った", side: "long", entry: (c) => (c.gapPct <= -1 && (prevReturnPct(c.bars, c.i) ?? 0) <= -2 ? "open" : null) },
+  { key: "gap-down-calm", label: "相場全体は安くないのに1%以上安く寄った", side: "long", entry: (c) => (c.gapPct <= -1 && c.marketGapPct > -0.3 ? "open" : null) },
   { key: "idio-gap-down", label: "相場より1%以上安く寄った", side: "long", entry: (c) => (c.gapPct - c.marketGapPct <= -1 ? "open" : null) },
   { key: "idio-gap-up", label: "相場より1%以上高く寄った", side: "short", entry: (c) => (c.gapPct - c.marketGapPct >= 1 ? "open" : null) },
   { key: "mkt-gap-down", label: "相場全体が1%以上安く寄った", side: "long", entry: (c) => (c.marketGapPct <= -1 ? "open" : null) },
@@ -102,6 +104,7 @@ export const DAILY_RULES: DailyRule[] = [
   { key: "fade-high", label: "前日高値に指値で売り", side: "short", entry: (c) => ({ limit: prevHigh(c) }) },
   // ここから持ち越し（大引けで買い、翌朝の寄り付きで売る）。「当日」は買う日のこと
   { key: "on-all", label: "持ち越し：毎日", side: "long", entry: () => "overnight" },
+  ...["月", "火", "水", "木", "金"].map((name, k): DailyRule => ({ key: `on-dow${k + 1}`, label: `持ち越し：${name}曜の引けで買う`, side: "long", entry: (c) => (new Date(`${c.bars[c.i - 1].date}T00:00:00Z`).getUTCDay() === k + 1 ? "overnight" : null) })),
   { key: "on-drop", label: "持ち越し：当日3%以上下げた", side: "long", entry: (c) => ((prevReturnPct(c.bars, c.i) ?? 0) <= -3 ? "overnight" : null) },
   { key: "on-jump", label: "持ち越し：当日3%以上上げた", side: "long", entry: (c) => ((prevReturnPct(c.bars, c.i) ?? 0) >= 3 ? "overnight" : null) },
   { key: "on-intraday-down", label: "持ち越し：場中に2%以上下げた", side: "long", entry: (c) => (prevIntradayPct(c.bars, c.i) <= -2 ? "overnight" : null) },

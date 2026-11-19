@@ -21,7 +21,12 @@ export interface OpenQuote {
   close: number;
   /** その日が権利落ち日のときの1株あたり配当 */
   dividend?: number;
+  /** 前日の終値が前々日の終値から何%動いたか（配当落ち調整済み）。前々日の足がなければ無い */
+  prevReturnPct?: number;
 }
+
+/** 持ち越しの対象銘柄。overnightSymbols が空なら symbols と同じ */
+export const overnightSymbols = (s: Settings) => (s.overnightSymbols.length > 0 ? s.overnightSymbols : s.symbols);
 
 /** 日足の値で動かす戦略か */
 export function isDailyStrategy(s: Settings): boolean {
@@ -43,23 +48,27 @@ export function openQuote(bars: DailyBar[], i: number, maxGapPct = 25): OpenQuot
   if (!b || !p || !(b.o > 0) || b.h < Math.max(b.o, b.c) || b.l > Math.min(b.o, b.c)) return null;
   const prevClose = p.c - (b.dividend ?? 0);
   if (!(prevClose > 0) || Math.abs(b.o - prevClose) / prevClose > maxGapPct / 100) return null;
-  return { prevClose, open: b.o, low: b.l, close: b.c, ...(b.dividend ? { dividend: b.dividend } : {}) };
+  const pp = bars[i - 2];
+  const base = pp ? pp.c - (p.dividend ?? 0) : 0;
+  return { prevClose, open: b.o, low: b.l, close: b.c, ...(b.dividend ? { dividend: b.dividend } : {}), ...(base > 0 ? { prevReturnPct: ((p.c - base) / base) * 100 } : {}) };
 }
 
 /**
  * 1回分の処理。quotes には寄り付いた銘柄のその時点の値を渡す。state を書き換え、決済された取引を返す。
  * - まだ判断していない銘柄は、ここで入るかどうかを決める（あとから同じ銘柄に入り直すことはない）。
  *   同時に持つのは1ポジションまでなので、条件に合う銘柄が複数あればギャップが最も大きいものを買う。
+ *   gapPrevDropPct があれば、前日もそれ以上下げていた銘柄だけを候補にする（前日の騰落が分からない銘柄は見送る）。
  * - 保有中の銘柄は、安値が損切りの値以下なら損切り、dayComplete なら終値で決済する。
  */
 export function gapOpenTick(state: DayState, s: Settings, quotes: Record<string, OpenQuote>, now: number, dayComplete: boolean): Trade[] {
   const trades: Trade[] = [];
   const decided = (state.decided ??= []);
-  const fresh = Object.keys(quotes).filter((sym) => !decided.includes(sym));
+  const fresh = Object.keys(quotes).filter((sym) => s.symbols.includes(sym) && !decided.includes(sym));
   decided.push(...fresh);
 
   const gap = (sym: string) => (quotes[sym].open - quotes[sym].prevClose) / quotes[sym].prevClose;
-  const candidates = fresh.filter((sym) => gap(sym) * 100 <= -s.gapMinPct).sort((a, b) => gap(a) - gap(b));
+  const dropped = (sym: string) => s.gapPrevDropPct <= 0 || (quotes[sym].prevReturnPct ?? 0) <= -s.gapPrevDropPct;
+  const candidates = fresh.filter((sym) => gap(sym) * 100 <= -s.gapMinPct && dropped(sym)).sort((a, b) => gap(a) - gap(b));
   for (const symbol of candidates) {
     if (state.position || state.halted) break;
     const fine = s.fineTickSymbols.includes(symbol);
@@ -109,17 +118,21 @@ export function overnightExit(state: DayState, s: Settings, quotes: Record<strin
 /**
  * 大引けでの持ち越しの買い。場中（始値から終値）に overnightMinPct 以上上げた銘柄のうち、最も上げた
  * 1銘柄を終値で買う。損切りは置けない。実際には大引けの前に注文を出すので、判断はその時点の値になる。
+ * overnightWeekdays があればその曜日の大引けだけで買い、overnightSymbols があればその銘柄だけを対象にする。
  */
 export function overnightEntry(state: DayState, s: Settings, quotes: Record<string, OpenQuote>): void {
   if (state.position || state.halted) return;
+  if (s.overnightWeekdays.length > 0 && !s.overnightWeekdays.includes(new Date(`${state.date}T00:00:00Z`).getUTCDay())) return;
+  const targets = overnightSymbols(s);
+  const shares = s.overnightShares > 0 ? s.overnightShares : s.shares;
   const cap = s.overnightMaxPositionYen > 0 ? s.overnightMaxPositionYen : s.maxPositionYen;
   const gain = (sym: string) => (quotes[sym].close - quotes[sym].open) / quotes[sym].open;
   const pick = Object.keys(quotes)
-    .filter((sym) => gain(sym) * 100 >= s.overnightMinPct && !(cap > 0 && quotes[sym].close * s.shares > cap))
+    .filter((sym) => targets.includes(sym) && gain(sym) * 100 >= s.overnightMinPct && !(cap > 0 && quotes[sym].close * shares > cap))
     .sort((a, b) => gain(b) - gain(a))[0];
   if (!pick) return;
   const entry = quotes[pick].close;
-  state.position = { symbol: pick, side: "long", shares: s.shares, entryT: jstTime(state.date, 15 * 60 + 30), entryPrice: entry, stop: 0, target: cleanPrice(entry * 100), overnight: true };
+  state.position = { symbol: pick, side: "long", shares, entryT: jstTime(state.date, 15 * 60 + 30), entryPrice: entry, stop: 0, target: cleanPrice(entry * 100), overnight: true };
 }
 
 /**
@@ -143,9 +156,12 @@ export function dailyTick(state: DayState, s: Settings, quotes: Record<string, O
  * 日足でのバックテスト（安寄り買い、持ち越し、その両方）。銘柄ごとの日足を日付でそろえ、1日ずつ dailyTick に流す。
  * 持ち越したポジションは、その銘柄の次の足が出た日の寄り付きで決済する。
  * 損切りした時刻は日足からは分からないので、取引の決済時刻は大引けにしてある。
+ * 持ち越した銘柄の翌営業日の足が壊れているときは、その取引を数えない。
+ * 渡した銘柄はすべて対象にする。ただし overnightSymbols にだけある銘柄は、持ち越しだけの対象にする。
  */
 export function runGapOpenBacktest(data: [string, DailyBar[]][], settings: Settings): BacktestResult {
-  const s: Settings = { ...settings, symbols: data.map(([sym]) => sym) };
+  const onlyOvernight = (sym: string) => settings.overnightSymbols.includes(sym) && !settings.symbols.includes(sym);
+  const s: Settings = { ...settings, symbols: data.map(([sym]) => sym).filter((sym) => !onlyOvernight(sym)) };
   const index = data.map(([sym, bars]) => [sym, bars, new Map(bars.map((b, i) => [b.date, i]))] as const);
   const dates = [...new Set(data.flatMap(([, bars]) => bars.slice(1).map((b) => b.date)))].sort();
   const daily: DayResult[] = [];
@@ -158,6 +174,9 @@ export function runGapOpenBacktest(data: [string, DailyBar[]][], settings: Setti
       const q = i == null ? null : openQuote(bars, i);
       if (q) quotes[sym] = q;
     }
+    // 持ち越した銘柄のこの日の足が壊れている（桁違いの値など）ときは、買値も売値も信用できないので取引ごと無かったことにする
+    const held = (carried as DayState["position"])?.symbol;
+    if (held && !quotes[held] && index.some(([sym, , at]) => sym === held && at.has(date))) carried = null;
     const state = newDay(date);
     state.position = carried;
     trades.push(...dailyTick(state, s, quotes, jstTime(date, 15 * 60 + 30), true));
