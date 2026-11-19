@@ -41,7 +41,7 @@ function closePosition(
   state.position = null;
   state.realizedPnl += pnl;
   state.tradeCount += 1;
-  if (state.realizedPnl >= s.dailyTargetYen) state.halted = "target";
+  if (s.dailyTargetYen > 0 && state.realizedPnl >= s.dailyTargetYen) state.halted = "target";
   else if (state.realizedPnl <= -s.dailyLossLimitYen) state.halted = "loss_limit";
   else if (state.tradeCount >= s.maxTradesPerDay) state.halted = "max_trades";
   return trade;

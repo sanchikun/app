@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { runBacktest } from "../core/backtest";
+import { monthly, runBacktest } from "../core/backtest";
 import { jstDate } from "../core/market";
 import { normalizeSymbol, parseSettings } from "../core/types";
 import { INTERVAL_SECONDS, RANGES, getProvider } from "../data/provider";
@@ -42,7 +42,13 @@ app.get("/", (c) => c.html(page));
 
 app.get("/api/status", async (c) => {
   const date = jstDate(Date.now() / 1000);
-  const [settings, day] = await Promise.all([getSettings(c.env.DB), getDay(c.env.DB, date)]);
+  const [settings, day, month] = await Promise.all([
+    getSettings(c.env.DB),
+    getDay(c.env.DB, date),
+    c.env.DB.prepare("SELECT COALESCE(SUM(realized_pnl), 0) AS pnl, COUNT(*) AS days, COALESCE(SUM(trade_count), 0) AS trades FROM days WHERE date LIKE ?")
+      .bind(`${date.slice(0, 7)}-%`)
+      .first<{ pnl: number; days: number; trades: number }>(),
+  ]);
   const pnl = day?.realizedPnl ?? 0;
   return c.json({
     mode: "paper",
@@ -51,7 +57,9 @@ app.get("/api/status", async (c) => {
     date,
     realizedPnl: pnl,
     dailyTargetYen: settings.dailyTargetYen,
-    targetReached: pnl >= settings.dailyTargetYen,
+    targetReached: settings.dailyTargetYen > 0 && pnl >= settings.dailyTargetYen,
+    dailyLossLimitYen: settings.dailyLossLimitYen,
+    month: { month: date.slice(0, 7), pnl: month?.pnl ?? 0, days: month?.days ?? 0, trades: month?.trades ?? 0 },
     tradeCount: day?.tradeCount ?? 0,
     halted: day?.halted ?? null,
     position: day?.position ?? null,
@@ -78,6 +86,15 @@ app.get("/api/pnl/daily", async (c) => {
     "SELECT date, realized_pnl AS pnl, trade_count AS trades, halted FROM days ORDER BY date DESC LIMIT 365",
   ).all();
   return c.json({ daily: results });
+});
+
+app.get("/api/pnl/monthly", async (c) => {
+  const { results } = await c.env.DB.prepare("SELECT date, realized_pnl AS pnl, trade_count AS trades FROM days ORDER BY date").all<{
+    date: string;
+    pnl: number;
+    trades: number;
+  }>();
+  return c.json({ monthly: monthly(results).reverse() });
 });
 
 app.get("/api/settings", async (c) => c.json(await getSettings(c.env.DB)));

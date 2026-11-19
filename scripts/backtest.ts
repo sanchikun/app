@@ -44,4 +44,5 @@ console.log(`目標達成 ${s.targetDays}日  損失上限 ${s.lossLimitDays}日
 console.log(
   `取引 ${s.trades}回  勝率 ${s.winRate == null ? "-" : `${(s.winRate * 100).toFixed(1)}%`}  PF ${s.profitFactor == null ? "-" : s.profitFactor.toFixed(2)}  最大DD ${yen(-s.maxDrawdown)}  最悪日 ${yen(s.worstDay)}  最良日 ${yen(s.bestDay)}`,
 );
+for (const m of result.monthly) console.log(`  ${m.month}  ${yen(m.pnl).padStart(8)}  ${m.days}日  ${m.trades}回`);
 for (const d of result.daily) console.log(`  ${d.date}  ${yen(d.pnl).padStart(8)}  ${d.trades}回  ${d.halted ?? ""}`);

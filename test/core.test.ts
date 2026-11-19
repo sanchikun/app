@@ -9,7 +9,7 @@ import { parseYahooChart, synthetic } from "../src/data/provider";
 
 // 2026-11-18 09:00 JST
 const OPEN = Date.UTC(2026, 10, 18, 0, 0, 0) / 1000;
-const S: Settings = { ...DEFAULT_SETTINGS, slippageTicks: 0, orbMinutes: 15, dailyLossLimitYen: 600 };
+const S: Settings = { ...DEFAULT_SETTINGS, slippageTicks: 0, orbMinutes: 15, dailyTargetYen: 100, dailyLossLimitYen: 600 };
 const SYM = "7203.T";
 
 /** 5分足を n 本目の位置に作る */
@@ -83,6 +83,11 @@ describe("engine", () => {
     expect(trades[0]).toMatchObject({ entryPrice: 1013, exitPrice: 1017, pnl: 400, reason: "take_profit" });
     expect(state.halted).toBe("target");
     expect(state.position).toBeNull();
+  });
+  it("keeps trading after a win when there is no profit cap", () => {
+    const { state } = run([...breakout, bar(4, 1013, 1018, 1012, 1016)], { ...S, dailyTargetYen: 0 });
+    expect(state.realizedPnl).toBe(400);
+    expect(state.halted).toBeNull();
   });
   it("does not enter before the signal bar's successor", () => {
     const { state } = run(breakout);
@@ -174,6 +179,7 @@ describe("backtest", () => {
       bestDay: 400,
     });
     expect(r.summary.profitFactor).toBeCloseTo(400 / 600);
+    expect(r.monthly).toEqual([{ month: "2026-11", pnl: -200, days: 2, trades: 2 }]);
   });
   it("runs on synthetic data without lookahead-dependent state", async () => {
     const now = OPEN + 8 * 3600; // 17:00 JST、当日分まで確定
@@ -191,6 +197,7 @@ describe("inputs", () => {
   it("validates settings", () => {
     expect(parseSettings({ shares: 200 }).shares).toBe(200);
     expect(parseSettings({ symbols: ["7203", "6758.t"] }).symbols).toEqual(["7203.T", "6758.T"]);
+    expect(parseSettings({ dailyTargetYen: 0 }).dailyTargetYen).toBe(0);
     expect(() => parseSettings({ shares: 0 })).toThrow();
     expect(() => parseSettings({ strategy: "x" })).toThrow();
     expect(() => parseSettings({ forceCloseAt: "25:00" })).toThrow();

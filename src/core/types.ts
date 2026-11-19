@@ -19,7 +19,7 @@ export interface Settings {
   symbols: string[];
   strategy: StrategyName;
   shares: number;
-  /** この金額以上の確定益でその日の新規発注を止める */
+  /** この金額以上の確定益でその日の新規発注を止める。0 なら利益の上限なし */
   dailyTargetYen: number;
   /** この金額以上の確定損でその日の新規発注を止める。損切り幅もこの枠に収まるよう狭める */
   dailyLossLimitYen: number;
@@ -47,8 +47,8 @@ export const DEFAULT_SETTINGS: Settings = {
   symbols: ["7203.T"],
   strategy: "orb",
   shares: 100,
-  dailyTargetYen: 100,
-  dailyLossLimitYen: 500,
+  dailyTargetYen: 0,
+  dailyLossLimitYen: 1000,
   maxTradesPerDay: 3,
   slippageTicks: 1,
   commissionPerOrderYen: 0,
@@ -132,7 +132,7 @@ export function parseSettings(input: unknown, base: Settings = DEFAULT_SETTINGS)
   bool("enabled");
   bool("allowShort");
   num("shares", 1, 100000, true);
-  num("dailyTargetYen", 1, 1e7);
+  num("dailyTargetYen", 0, 1e7);
   num("dailyLossLimitYen", 1, 1e7);
   num("maxTradesPerDay", 1, 100, true);
   num("slippageTicks", 0, 20, true);

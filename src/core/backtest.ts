@@ -9,6 +9,28 @@ export interface DayResult {
   halted: HaltReason | null;
 }
 
+export interface MonthResult {
+  /** "YYYY-MM" */
+  month: string;
+  pnl: number;
+  days: number;
+  trades: number;
+}
+
+/** 日次の結果を月ごとに合計する（月の古い順） */
+export function monthly(daily: { date: string; pnl: number; trades: number }[]): MonthResult[] {
+  const months = new Map<string, MonthResult>();
+  for (const d of daily) {
+    const key = d.date.slice(0, 7);
+    const m = months.get(key) ?? { month: key, pnl: 0, days: 0, trades: 0 };
+    m.pnl += d.pnl;
+    m.days += 1;
+    m.trades += d.trades;
+    months.set(key, m);
+  }
+  return [...months.values()].sort((a, b) => a.month.localeCompare(b.month));
+}
+
 export interface BacktestResult {
   symbol: string;
   summary: {
@@ -30,6 +52,7 @@ export interface BacktestResult {
     worstDay: number;
     bestDay: number;
   };
+  monthly: MonthResult[];
   daily: DayResult[];
   trades: Trade[];
 }
@@ -75,6 +98,7 @@ export function runBacktest(symbol: string, bars: Bar[], settings: Settings): Ba
       worstDay: pnls.length ? Math.min(...pnls) : 0,
       bestDay: pnls.length ? Math.max(...pnls) : 0,
     },
+    monthly: monthly(daily),
     daily,
     trades,
   };

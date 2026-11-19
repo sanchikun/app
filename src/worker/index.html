@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>デイトレ +100円</title>
+<title>デイトレ検証</title>
 <style>
   :root { --bg:#f6f7f9; --card:#fff; --text:#1a1d21; --muted:#6b7280; --line:#e3e6ea; --up:#0a7d4b; --down:#c0392b; --accent:#2457d6; }
   @media (prefers-color-scheme: dark) {
@@ -38,13 +38,19 @@
 <body>
 <main>
   <div class="row">
-    <h1>デイトレ +100円 <span class="badge">ペーパートレード</span><span class="badge" id="source"></span></h1>
+    <h1>デイトレ検証 <span class="badge">ペーパートレード</span><span class="badge" id="source"></span></h1>
   </div>
   <div id="error"></div>
 
   <section>
+    <h2>今月 <span class="muted" id="month"></span></h2>
+    <div class="big" id="monthPnl">–</div>
+    <div class="muted" id="monthInfo"></div>
+  </section>
+
+  <section>
     <h2>今日 <span class="muted" id="date"></span></h2>
-    <div class="big" id="pnl">–</div>
+    <div class="big" id="pnl" style="font-size:26px">–</div>
     <div class="row muted">
       <span id="progress"></span><span id="state"></span>
     </div>
@@ -66,6 +72,11 @@
       <button class="primary">実行</button>
     </form>
     <div id="btResult"></div>
+  </section>
+
+  <section>
+    <h2>月次損益</h2>
+    <div class="scroll"><table id="monthly"></table></div>
   </section>
 
   <section>
@@ -117,13 +128,18 @@ function table(el, head, rows, empty) {
 let enabled = false;
 async function refresh() {
   try {
-    const [s, d, t] = await Promise.all([api("/api/status"), api("/api/pnl/daily"), api("/api/trades")]);
+    const [s, d, t, m] = await Promise.all([api("/api/status"), api("/api/pnl/daily"), api("/api/trades"), api("/api/pnl/monthly")]);
     enabled = s.enabled;
     $("source").textContent = s.dataSource === "synthetic" ? "合成データ" : "約20分遅れ";
+    $("month").textContent = s.month.month;
+    $("monthPnl").textContent = yen(s.month.pnl);
+    $("monthPnl").className = `big ${cls(s.month.pnl)}`;
+    $("monthInfo").textContent = `${s.month.days}日・取引 ${s.month.trades}回`;
+    table($("monthly"), ["月", "損益", "日数", "取引"], m.monthly.map((r) => [r.month, [yen(r.pnl), cls(r.pnl)], `${r.days}日`, `${r.trades}回`]), "まだ記録がありません");
     $("date").textContent = s.date;
     $("pnl").textContent = yen(s.realizedPnl);
     $("pnl").className = `big ${cls(s.realizedPnl)}`;
-    $("progress").textContent = `目標 ${yen(s.dailyTargetYen)}・取引 ${s.tradeCount}回`;
+    $("progress").textContent = `${s.dailyTargetYen > 0 ? `利益 ${yen(s.dailyTargetYen)} で終了` : "利益の上限なし"}・損失上限 ${yen(-s.dailyLossLimitYen)}・取引 ${s.tradeCount}回`;
     $("state").textContent = s.halted ? HALT[s.halted] : s.enabled ? "稼働中" : "停止中";
     $("position").textContent = s.position
       ? `保有中: ${s.position.symbol} ${SIDE[s.position.side]} ${s.position.shares}株 @${s.position.entryPrice}（損切り ${s.position.stop}／利確 ${s.position.target}）`
@@ -159,7 +175,8 @@ $("bt").addEventListener("submit", async (ev) => {
     out.innerHTML = `<div class="stats">
       ${stat("合計損益", yen(s.totalPnl), cls(s.totalPnl))}
       ${stat("1日平均", yen(s.avgPnlPerDay), cls(s.avgPnlPerDay))}
-      ${stat("目標達成", `${s.targetDays} / ${s.days}日`)}
+      ${stat("プラスの月", `${r.monthly.filter((x) => x.pnl > 0).length} / ${r.monthly.length}か月`)}
+      ${stat("勝ち日", `${s.winDays} / ${s.days}日`)}
       ${stat("損失上限", `${s.lossLimitDays}日`)}
       ${stat("取引", `${s.trades}回`)}
       ${stat("勝率", s.winRate == null ? "–" : `${(s.winRate * 100).toFixed(1)}%`)}
@@ -167,7 +184,9 @@ $("bt").addEventListener("submit", async (ev) => {
       ${stat("最大ドローダウン", yen(-s.maxDrawdown), s.maxDrawdown ? "down" : "")}
     </div>
     <p class="muted">${r.symbol}・${r.source === "synthetic" ? "合成データ（数字に意味はありません）" : "Yahoo Finance"}・過去の成績は将来の利益を保証しません</p>
+    <div class="scroll"><table id="btMonthly"></table></div>
     <div class="scroll"><table id="btDaily"></table></div>`;
+    table($("btMonthly"), ["月", "損益", "日数", "取引"], [...r.monthly].reverse().map((x) => [x.month, [yen(x.pnl), cls(x.pnl)], `${x.days}日`, `${x.trades}回`]), "データがありません");
     table($("btDaily"), ["日付", "損益", "取引", "状態"], [...r.daily].reverse().map((d) => [d.date, [yen(d.pnl), cls(d.pnl)], `${d.trades}回`, HALT[d.halted] ?? ""]), "データがありません");
   } catch (e) { out.textContent = `失敗: ${e.message}`; }
 });
