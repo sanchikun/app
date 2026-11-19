@@ -11,14 +11,14 @@
 import { gapFadeDaily, summarize } from "../src/core/gapstudy";
 import type { GapSummary, GapTrade } from "../src/core/gapstudy";
 import { normalizeSymbol } from "../src/core/types";
-import { DEFAULT_SYMBOLS, loadDaily } from "./universe";
+import { loadDaily, universe } from "./universe";
 
 const args = process.argv.slice(2);
 const flag = (name: string) => {
   const i = args.indexOf(`--${name}`);
   return i >= 0 ? args[i + 1] : undefined;
 };
-const symbols = (flag("symbols")?.split(",") ?? DEFAULT_SYMBOLS).map((s: string) => normalizeSymbol(s.trim()));
+const symbols = (flag("symbols")?.split(",") ?? universe(flag("universe"))).map((s: string) => normalizeSymbol(s.trim()));
 const range = flag("range") ?? "10y";
 const minGapPct = Number(flag("gap") ?? 1);
 const slippageTicks = Number(flag("slippage") ?? 1);

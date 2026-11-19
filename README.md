@@ -68,7 +68,7 @@ npm run backtest -- 7203 --synthetic                      # 合成データ（�
 
 ```bash
 npm run backtest -- 7203,6758,8306 --strategy gapopen --loss-limit 3000      # 日足 × 10年
-npm run backtest -- all --strategy gapopen --loss-limit 3000 --max-position 500000   # 既定の50銘柄
+npm run backtest -- core --strategy gapopen --loss-limit 3000 --max-position 500000  # 既定の50銘柄（wide で他の約200銘柄、all で両方）
 ```
 
 実際の取引と違う点があります。寄り値は寄り付くまで分からないので、実際には寄り前の気配で「1%以上安く寄るか」を判断することになり、外れる日があります。急落時の損切りは1ティックより大きく滑ることがあります。
@@ -101,9 +101,12 @@ npm run gapstudy -- --range 5y --gap 2 --slippage 0
 
 ```bash
 npm run dailystudy                         # 既定の50銘柄、10年
+npm run dailystudy -- --universe wide      # それ以外の東証プライムの主な約210銘柄（all で両方）
 npm run dailystudy -- --detail fade-low    # 1つのルールを年ごと、相場全体の寄り付き別、月次で見る
 npm run dailystudy -- --split 2020 --notional 500000
 ```
+
+「持ち越し」と付くルールは、大引けで買って翌朝の寄り付きで売ります（デイトレではなく、夜間の値動きを取りにいく形）。買う日の終値までの情報だけで判断します。
 
 寄り付きと大引けは成行（寄成・引成）で板寄せの値段で約定するとみなし、滑りを加えません。逆指値で入るルールは滑りを1ティック加え、指値で入るルールは値が指値を1ティック以上抜けた日だけ約定とします。
 

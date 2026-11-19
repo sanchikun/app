@@ -9,7 +9,7 @@ import { DEFAULT_SETTINGS, normalizeSymbol, parseSettings } from "../src/core/ty
 import { runGapOpenBacktest } from "../src/core/gapopen";
 import { getProvider } from "../src/data/provider";
 import type { Interval, Range } from "../src/data/provider";
-import { DEFAULT_SYMBOLS, loadDaily } from "./universe";
+import { loadDaily, universe } from "./universe";
 
 const args = process.argv.slice(2);
 const flag = (name: string) => {
@@ -42,8 +42,8 @@ if (flag("max-position")) overrides.maxPositionYen = Number(flag("max-position")
 const yen = (n: number) => `${n >= 0 ? "+" : ""}${Math.round(n)}円`;
 
 if (flag("strategy") === "gapopen") {
-  // 安寄り買いは日足で検証する。銘柄はカンマ区切りで複数、または all（既定の銘柄リスト）を指定できる
-  const list = (symbolArg === "all" ? DEFAULT_SYMBOLS : symbolArg.split(",")).map((x: string) => normalizeSymbol(x.trim()));
+  // 安寄り買いは日足で検証する。銘柄はカンマ区切りで複数、または core（既定の50銘柄）・wide（それ以外の約200銘柄）・all（両方）を指定できる
+  const list = (["core", "wide", "all"].includes(symbolArg) ? universe(symbolArg) : symbolArg.split(",")).map((x: string) => normalizeSymbol(x.trim()));
   if (!args.includes("--standard-tick")) overrides.fineTickSymbols = list;
   const s = { ...parseSettings(overrides, DEFAULT_SETTINGS), symbols: list };
   const range = flag("range") ?? "10y";

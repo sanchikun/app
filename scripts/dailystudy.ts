@@ -1,6 +1,7 @@
 /**
  * 日足で検証できる「当日中に手仕舞う」ルールをまとめて試す。
  *   npm run dailystudy                         # 既定の50銘柄、10年
+ *   npm run dailystudy -- --universe wide      # 既定の50銘柄以外の約200銘柄（all で両方）
  *   npm run dailystudy -- --split 2022         # 前半・後半の境目の年（既定 2022）
  *   npm run dailystudy -- --detail fade-low    # 1つのルールを年ごと・同時に入った銘柄数ごとに見る
  *   npm run dailystudy -- --range 5y --symbols 7203,6758 --cache .cache
@@ -11,14 +12,14 @@ import { DAILY_RULES, marketGaps, runRule } from "../src/core/dailystudy";
 import type { DailyTrade } from "../src/core/dailystudy";
 import { summarize } from "../src/core/gapstudy";
 import { normalizeSymbol } from "../src/core/types";
-import { DEFAULT_SYMBOLS, loadDaily } from "./universe";
+import { loadDaily, universe } from "./universe";
 
 const args = process.argv.slice(2);
 const flag = (name: string) => {
   const i = args.indexOf(`--${name}`);
   return i >= 0 ? args[i + 1] : undefined;
 };
-const symbols = (flag("symbols")?.split(",") ?? DEFAULT_SYMBOLS).map((s: string) => normalizeSymbol(s.trim()));
+const symbols = (flag("symbols")?.split(",") ?? universe(flag("universe"))).map((s: string) => normalizeSymbol(s.trim()));
 const range = flag("range") ?? "10y";
 const split = flag("split") ?? "2022";
 const notional = Number(flag("notional") ?? 300000);
@@ -111,7 +112,7 @@ if (picked) {
       }
     }
     all.sort((a, b) => a - b);
-    const worstTrade = Math.min(...tr.map((t) => t.ret)) * notional;
+    const worstTrade = tr.reduce((a, t) => Math.min(a, t.ret), 0) * notional;
     console.log(`  損切り ${pad(label, 4)}  月の平均 ${pad(yen(sum / months), 9)}  プラスの月 ${pct(plus / months)}  下位5%の月 ${pad(yen(all[Math.floor(all.length * 0.05)]), 10)}  最悪の月 ${pad(yen(worst), 10)}  1回の最大損失 ${yen(worstTrade)}`);
   }
 

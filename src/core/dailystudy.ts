@@ -31,8 +31,12 @@ export interface DailyRule {
   key: string;
   label: string;
   side: "long" | "short";
-  /** 入るなら "open"（寄り付きで成行）か、逆指値（stop）または指値（limit）の値段を返す */
-  entry(ctx: RuleContext): "open" | { stop: number } | { limit: number } | null;
+  /**
+   * 入るなら "open"（寄り付きで成行）か、逆指値（stop）または指値（limit）の値段を返す。
+   * "overnight" は前日の大引けで入り、当日の寄り付きで手仕舞う（持ち越し）。このときは前日の終値までの
+   * 情報だけで判断すること。当日のギャップ（gapPct、marketGapPct）は結果そのものなので見てはいけない。
+   */
+  entry(ctx: RuleContext): "open" | "overnight" | { stop: number } | { limit: number } | null;
 }
 
 /** 前日の終値が前々日より何%動いたか（配当落ち調整済み） */
@@ -50,6 +54,12 @@ function streak(bars: DailyBar[], i: number, n: number, dir: 1 | -1): boolean {
     if ((bars[i - k].c - base) * dir <= 0) return false;
   }
   return true;
+}
+
+/** 前日の場中（始値から終値）の騰落率（%） */
+function prevIntradayPct(bars: DailyBar[], i: number): number {
+  const p = bars[i - 1];
+  return p.o > 0 ? ((p.c - p.o) / p.o) * 100 : 0;
 }
 
 /** 前日の終値が、前日の値幅のどの位置か（0 = 安値、1 = 高値） */
@@ -90,6 +100,15 @@ export const DAILY_RULES: DailyRule[] = [
   { key: "nr7-break-high", label: "値幅縮小の翌日に前日高値を上抜け", side: "long", entry: (c) => (nr7(c.bars, c.i) ? { stop: prevHigh(c) } : null) },
   { key: "fade-low", label: "前日安値に指値で買い", side: "long", entry: (c) => ({ limit: prevLow(c) }) },
   { key: "fade-high", label: "前日高値に指値で売り", side: "short", entry: (c) => ({ limit: prevHigh(c) }) },
+  // ここから持ち越し（大引けで買い、翌朝の寄り付きで売る）。「当日」は買う日のこと
+  { key: "on-all", label: "持ち越し：毎日", side: "long", entry: () => "overnight" },
+  { key: "on-drop", label: "持ち越し：当日3%以上下げた", side: "long", entry: (c) => ((prevReturnPct(c.bars, c.i) ?? 0) <= -3 ? "overnight" : null) },
+  { key: "on-jump", label: "持ち越し：当日3%以上上げた", side: "long", entry: (c) => ((prevReturnPct(c.bars, c.i) ?? 0) >= 3 ? "overnight" : null) },
+  { key: "on-intraday-down", label: "持ち越し：場中に2%以上下げた", side: "long", entry: (c) => (prevIntradayPct(c.bars, c.i) <= -2 ? "overnight" : null) },
+  { key: "on-intraday-up", label: "持ち越し：場中に2%以上上げた", side: "long", entry: (c) => (prevIntradayPct(c.bars, c.i) >= 2 ? "overnight" : null) },
+  { key: "on-weak-close", label: "持ち越し：安値引け（下位10%）", side: "long", entry: (c) => ((closeLocation(c.bars, c.i) ?? 0.5) <= 0.1 ? "overnight" : null) },
+  { key: "on-strong-close", label: "持ち越し：高値引け（上位10%）", side: "long", entry: (c) => ((closeLocation(c.bars, c.i) ?? 0.5) >= 0.9 ? "overnight" : null) },
+  { key: "on-down3", label: "持ち越し：3日続落", side: "long", entry: (c) => (streak(c.bars, c.i, 3, -1) ? "overnight" : null) },
 ];
 
 function usable(b: DailyBar): boolean {
@@ -135,6 +154,11 @@ export function runRule(rule: DailyRule, symbol: string, bars: DailyBar[], marke
     if (gapPct == null || marketGapPct == null) continue;
     const e = rule.entry({ bars, i, prevClose: bars[i - 1].c - (b.dividend ?? 0), gapPct, marketGapPct });
     if (e == null) continue;
+    if (e === "overnight") {
+      // 前日の大引けで買い、当日の寄り付きで売る。配当落ち日は配当を受け取るので、調整済みのギャップがそのまま損益率になる
+      trades.push({ symbol, date: b.date, ret: (dir * gapPct) / 100 });
+      continue;
+    }
     let entry = b.o;
     if (e !== "open" && "stop" in e) {
       // 寄り付きですでに抜けていれば始値で、場中に抜ければ逆指値の1ティック先で約定

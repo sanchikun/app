@@ -171,3 +171,26 @@ describe("損切りと分足での確認", async () => {
     expect(fadeReturn(fill, 2010, 0.5, 0.5)).toBeCloseTo((1989.5 - 2000) / 2000);
   });
 });
+
+describe("持ち越しのルール", async () => {
+  const { DAILY_RULES, marketGaps, runRule } = await import("../src/core/dailystudy");
+  const run = (key: string, bars: { date: string; o: number; h: number; l: number; c: number; dividend?: number }[]) =>
+    runRule(DAILY_RULES.find((r) => r.key === key)!, "X", bars, marketGaps([["X", bars]]));
+  const d0 = { date: "2026-11-02", o: 2000, h: 2000, l: 2000, c: 2000 };
+
+  it("前日の終値から当日の始値までが損益率になり、配当落ち日は配当を含める", () => {
+    expect(run("on-all", [d0, { date: "2026-11-04", o: 2010, h: 2020, l: 1990, c: 1995 }])[0].ret).toBeCloseTo(10 / 2000);
+    expect(run("on-all", [d0, { date: "2026-11-04", o: 1990, h: 1995, l: 1985, c: 1990, dividend: 20 }])[0].ret).toBeCloseTo(10 / 1980);
+  });
+
+  it("買う日の値動きだけで判断し、翌朝のギャップは見ない", () => {
+    const up = { date: "2026-11-04", o: 2000, h: 2050, l: 1995, c: 2045 };
+    const next = { date: "2026-11-05", o: 2030, h: 2040, l: 2020, c: 2035 };
+    const t = run("on-intraday-up", [d0, up, next]);
+    expect(t.map((x) => x.date)).toEqual(["2026-11-05"]);
+    expect(t[0].ret).toBeCloseTo(-15 / 2045);
+    // 翌朝がどう寄っても、買う日の条件が同じなら入る
+    expect(run("on-intraday-up", [d0, up, { ...next, o: 2100, h: 2110 }])).toHaveLength(1);
+    expect(run("on-intraday-down", [d0, up, next])).toHaveLength(0);
+  });
+});
