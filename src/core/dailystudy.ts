@@ -119,8 +119,13 @@ export function marketGaps(data: [string, DailyBar[]][]): Map<string, number> {
   return new Map([...sums].map(([d, [sum, n]]) => [d, sum / n]));
 }
 
-/** 1銘柄にルールを当てはめる。逆指値で入るときだけ stopSlippageTicks を加える */
-export function runRule(rule: DailyRule, symbol: string, bars: DailyBar[], market: Map<string, number>, stopSlippageTicks = 1): DailyTrade[] {
+/**
+ * 1銘柄にルールを当てはめる。逆指値で入るときだけ stopSlippageTicks を加える。
+ * stopLossPct を渡すと、約定値からその%だけ不利に動いた日は、そこから1ティック滑って損切りしたとする。
+ * 寄り付きや指値で入るルールは、約定がその日の安値（売りなら高値）より必ず前なので、日足でも順番を
+ * 間違えずに判定できる。逆指値で入るルールは約定の前後が分からないので損切りを付けない。
+ */
+export function runRule(rule: DailyRule, symbol: string, bars: DailyBar[], market: Map<string, number>, stopSlippageTicks = 1, stopLossPct?: number): DailyTrade[] {
   const trades: DailyTrade[] = [];
   const dir = rule.side === "long" ? 1 : -1;
   for (let i = 1; i < bars.length; i++) {
@@ -145,7 +150,12 @@ export function runRule(rule: DailyRule, symbol: string, bars: DailyBar[], marke
       else if (dir === 1 ? b.l <= e.limit - tick : b.h >= e.limit + tick) entry = e.limit;
       else continue;
     }
-    trades.push({ symbol, date: b.date, ret: (dir * (b.c - entry)) / entry });
+    let exit = b.c;
+    if (stopLossPct != null && (e === "open" || "limit" in e)) {
+      const stop = entry * (1 - (dir * stopLossPct) / 100);
+      if (dir === 1 ? b.l <= stop : b.h >= stop) exit = stop - dir * tickSize(stop, true);
+    }
+    trades.push({ symbol, date: b.date, ret: (dir * (exit - entry)) / entry });
   }
   return trades;
 }

@@ -11,6 +11,7 @@
     "screen": "tsx scripts/screen.ts",
     "gapstudy": "tsx scripts/gapstudy.ts",
     "dailystudy": "tsx scripts/dailystudy.ts",
+    "fadecheck": "tsx scripts/fadecheck.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },

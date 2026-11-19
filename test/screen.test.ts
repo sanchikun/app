@@ -137,3 +137,37 @@ describe("日足のルール検証", async () => {
     expect(run("gap-down", { o: 1975, h: 1980, l: 1970, c: 1978, dividend: 20 })).toHaveLength(0);
   });
 });
+
+describe("損切りと分足での確認", async () => {
+  const { DAILY_RULES, marketGaps, runRule } = await import("../src/core/dailystudy");
+  const { fadeFill, fadeReturn } = await import("../src/core/fadecheck");
+  const d0 = { date: "2026-11-02", o: 2000, h: 2010, l: 1990, c: 2000 };
+  const T = Date.UTC(2026, 10, 4, 0, 0, 0) / 1000;
+  const b5 = (n: number, l: number): Bar => ({ t: T + n * 300, o: 2000, h: 2000, l, c: 2000, v: 1 });
+
+  it("日足: 約定値から指定の%下げた日は1ティック滑って損切りし、逆指値で入るルールには付けない", () => {
+    const run = (key: string, day: object, stop?: number) => {
+      const bars = [d0, { date: "2026-11-04", o: 2000, h: 2000, l: 2000, c: 2000, ...day }];
+      return runRule(DAILY_RULES.find((r) => r.key === key)!, "X", bars, marketGaps([["X", bars]]), 1, stop);
+    };
+    // 1970 で寄り、1% 下の 1950.3 を割る。0.5円刻みなので 1949.8 で決済
+    expect(run("gap-down", { o: 1970, h: 1975, l: 1940, c: 1972 }, 1)[0].ret).toBeCloseTo((1949.8 - 1970) / 1970);
+    expect(run("gap-down", { o: 1970, h: 1975, l: 1955, c: 1972 }, 1)[0].ret).toBeCloseTo(2 / 1970);
+    expect(run("break-high", { h: 2020, l: 1900, c: 2015 }, 1)[0].ret).toBeCloseTo(4 / 2011);
+  });
+
+  it("分足: 寄り付き、場中、欠けた時間帯の約定を区別する", () => {
+    const base = { limit: 1990, tick: 0.5, open: 2000, low: 1995, bars: [b5(1, 1995), b5(2, 1989.5), b5(3, 1980)] };
+    expect(fadeFill(base)).toMatchObject({ kind: "intraday", t: T + 600, entry: 1990, lowAfter: 1980 });
+    expect(fadeFill({ ...base, open: 1985, low: 1975 })).toMatchObject({ kind: "open", entry: 1985, lowAfter: 1975 });
+    expect(fadeFill({ ...base, bars: [b5(1, 1990)], low: 1988 })).toMatchObject({ kind: "missing-bar", t: null, entry: 1990, lowAfter: 1988 });
+    expect(fadeFill({ ...base, bars: [b5(1, 1990)], low: 1990 })).toBeNull();
+  });
+
+  it("分足: 損切りは約定後の最安値で判定する", () => {
+    const fill = { kind: "intraday" as const, t: T, entry: 2000, lowAfter: 1985 };
+    expect(fadeReturn(fill, 2010, 0.5)).toBeCloseTo(0.005);
+    expect(fadeReturn(fill, 2010, 0.5, 1)).toBeCloseTo(0.005);
+    expect(fadeReturn(fill, 2010, 0.5, 0.5)).toBeCloseTo((1989.5 - 2000) / 2000);
+  });
+});

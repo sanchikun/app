@@ -78,30 +78,42 @@ if (picked) {
   head(`${rule.label}：相場全体の寄り付き`);
   for (const [label, lo, hi] of [["1%以上安い", -1e9, -1], ["0〜1%安い", -1, 0], ["0〜1%高い", 0, 1], ["1%以上高い", 1, 1e9]] as const) console.log(line(label, side, trades.filter((t) => mg(t) > lo && mg(t) <= hi)));
 
-  // 1日1銘柄だけ取引する人の月次。その日のシグナルから無作為に1つ選ぶのを繰り返して平均する
-  const byDay = new Map<string, number[]>();
-  for (const t of trades) byDay.set(t.date, [...(byDay.get(t.date) ?? []), t.ret]);
-  const days = [...byDay].sort(([a], [b]) => a.localeCompare(b));
-  let seed = 12345;
-  const rand = () => ((seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 4294967296);
-  const RUNS = 300;
-  let months = 0;
-  let plus = 0;
-  let sum = 0;
-  let worst = 0;
-  for (let r = 0; r < RUNS; r++) {
-    const m = new Map<string, number>();
-    for (const [d, rets] of days) m.set(d.slice(0, 7), (m.get(d.slice(0, 7)) ?? 0) + rets[Math.floor(rand() * rets.length)] * notional);
-    for (const v of m.values()) {
-      months++;
-      sum += v;
-      if (v > 0) plus++;
-      worst = Math.min(worst, v);
-    }
+  // 損切りを入れた場合と、1日1銘柄だけ取引する人の月次。月次は、その日のシグナルから無作為に1つ選ぶのを繰り返して平均する
+  const stops: [string, DailyTrade[]][] = [["なし", trades], ...[0.5, 1, 2, 3].map((p): [string, DailyTrade[]] => [`${p}%`, data.flatMap(([symbol, bars]) => runRule(rule, symbol, bars, market, 1, p))])];
+  const stoppable = stops[1][1].some((t, i) => t.ret !== trades[i].ret);
+  if (stoppable) {
+    head(`${rule.label}：損切り`);
+    for (const [label, tr] of stops) console.log(line(label, side, tr));
   }
   const yen = (n: number) => `${n >= 0 ? "+" : ""}${Math.round(n).toLocaleString("ja-JP")}円`;
-  console.log(`\n1日1銘柄を無作為に選び、1回 ${notional.toLocaleString("ja-JP")}円 分を取引した場合（${RUNS}通りの平均）`);
-  console.log(`  月の平均 ${yen(sum / months)}  プラスの月 ${pct(plus / months)}  最悪の月 ${yen(worst)}`);
+  const RUNS = 300;
+  console.log(`\n1日1銘柄を無作為に選び、1回 ${notional.toLocaleString("ja-JP")}円 分を取引した場合の月次（${RUNS}通りの平均）`);
+  for (const [label, tr] of stoppable ? stops : stops.slice(0, 1)) {
+    const byDay = new Map<string, number[]>();
+    for (const t of tr) byDay.set(t.date, [...(byDay.get(t.date) ?? []), t.ret]);
+    const days = [...byDay].sort(([a], [b]) => a.localeCompare(b));
+    let seed = 12345;
+    const rand = () => ((seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 4294967296);
+    let months = 0;
+    let plus = 0;
+    let sum = 0;
+    let worst = 0;
+    const all: number[] = [];
+    for (let r = 0; r < RUNS; r++) {
+      const m = new Map<string, number>();
+      for (const [d, rets] of days) m.set(d.slice(0, 7), (m.get(d.slice(0, 7)) ?? 0) + rets[Math.floor(rand() * rets.length)] * notional);
+      for (const v of m.values()) {
+        months++;
+        sum += v;
+        if (v > 0) plus++;
+        worst = Math.min(worst, v);
+        all.push(v);
+      }
+    }
+    all.sort((a, b) => a - b);
+    const worstTrade = Math.min(...tr.map((t) => t.ret)) * notional;
+    console.log(`  損切り ${pad(label, 4)}  月の平均 ${pad(yen(sum / months), 9)}  プラスの月 ${pct(plus / months)}  下位5%の月 ${pad(yen(all[Math.floor(all.length * 0.05)]), 10)}  最悪の月 ${pad(yen(worst), 10)}  1回の最大損失 ${yen(worstTrade)}`);
+  }
 
   const rets = trades.map((t) => t.ret).sort((a, b) => a - b);
   const q = (p: number) => `${(rets[Math.min(rets.length - 1, Math.floor(rets.length * p))] * 100).toFixed(2)}%`;
