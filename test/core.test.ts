@@ -244,3 +244,39 @@ describe("inputs", () => {
     expect(() => parseYahooChart({ chart: { error: { description: "No data found" } } })).toThrow("No data found");
   });
 });
+
+describe("指値での新規", () => {
+  // breakout の4本目（終値 1012）でシグナル。指値 1012、損切り 1007、利確 1017
+  const L: Settings = { ...S, entryOrder: "limit", limitWaitBars: 2, dailyTargetYen: 0 };
+
+  it("指値を1ティック抜けたら指値の値段で約定する", () => {
+    const { state } = run([...breakout, bar(4, 1013, 1015, 1011, 1014)], L);
+    expect(state.position).toMatchObject({ entryPrice: 1012, stop: 1007, target: 1017 });
+    expect(state.pending).toBeNull();
+  });
+
+  it("同値に触れただけでは約定せず、注文は残る", () => {
+    const { state } = run([...breakout, bar(4, 1013, 1015, 1012, 1014)], L);
+    expect(state.position).toBeNull();
+    expect(state.pending?.limit).toEqual({ price: 1012, barsLeft: 1 });
+  });
+
+  it("待つ本数を過ぎたら取り消す", () => {
+    const { state } = run([...breakout, bar(4, 1013, 1015, 1012, 1014), bar(5, 1014, 1016, 1013, 1015), bar(6, 1015, 1015, 1010, 1011)], L);
+    expect(state.position).toBeNull();
+  });
+
+  it("約定する前に利確の値に届いたら取り消す", () => {
+    const { state } = run([...breakout, bar(4, 1013, 1017, 1012, 1016)], L);
+    expect(state.position).toBeNull();
+    expect(state.pending).toBeNull();
+  });
+
+  it("約定した足では利確しないが、損切りはする", () => {
+    const tp = run([...breakout, bar(4, 1013, 1018, 1011, 1016)], L);
+    expect(tp.trades).toHaveLength(0);
+    expect(tp.state.position?.entryPrice).toBe(1012);
+    const sl = run([...breakout, bar(4, 1013, 1014, 1006, 1008)], L);
+    expect(sl.trades).toMatchObject([{ entryPrice: 1012, exitPrice: 1007, reason: "stop_loss", pnl: -500 }]);
+  });
+});

@@ -16,7 +16,7 @@ const flag = (name: string) => {
 };
 const symbolArg = args[0];
 if (!symbolArg || symbolArg.startsWith("--")) {
-  console.error("usage: npm run backtest -- <symbol> [--interval 5m] [--range 60d] [--strategy orb|vwap] [--slippage n] [--allow-short] [--synthetic]");
+  console.error("usage: npm run backtest -- <symbol> [--interval 5m] [--range 60d] [--strategy orb|vwap] [--slippage n] [--entry market|limit] [--limit-wait n] [--allow-short] [--synthetic]");
   process.exit(1);
 }
 
@@ -25,6 +25,8 @@ if (flag("strategy")) overrides.strategy = flag("strategy");
 if (flag("slippage")) overrides.slippageTicks = Number(flag("slippage"));
 if (flag("target")) overrides.dailyTargetYen = Number(flag("target"));
 if (flag("loss-limit")) overrides.dailyLossLimitYen = Number(flag("loss-limit"));
+if (flag("entry")) overrides.entryOrder = flag("entry");
+if (flag("limit-wait")) overrides.limitWaitBars = Number(flag("limit-wait"));
 if (args.includes("--allow-short")) overrides.allowShort = true;
 if (args.includes("--fine-tick")) overrides.fineTickSymbols = [args[0]];
 if (args.includes("--standard-tick")) overrides.fineTickSymbols = [];
@@ -40,7 +42,7 @@ const result = runBacktest(symbol, bars, settings);
 const s = result.summary;
 const yen = (n: number) => `${n >= 0 ? "+" : ""}${Math.round(n)}円`;
 
-console.log(`${symbol}  ${settings.strategy}  ${interval} × ${range}  ${synthetic ? "【合成データ】" : "Yahoo Finance"}`);
+console.log(`${symbol}  ${settings.strategy}${settings.entryOrder === "limit" ? `（指値・${settings.limitWaitBars}本待ち）` : ""}  ${interval} × ${range}  ${synthetic ? "【合成データ】" : "Yahoo Finance"}`);
 console.log(`日数 ${s.days}  合計 ${yen(s.totalPnl)}  1日平均 ${yen(s.avgPnlPerDay)}`);
 console.log(`目標達成 ${s.targetDays}日  損失上限 ${s.lossLimitDays}日  勝ち ${s.winDays}日  負け ${s.loseDays}日  取引なし・±0 ${s.flatDays}日`);
 console.log(

@@ -10,6 +10,7 @@ export interface Bar {
 
 export type Side = "long" | "short";
 export type StrategyName = "orb" | "vwap";
+export type EntryOrder = "market" | "limit";
 export type HaltReason = "target" | "loss_limit" | "max_trades";
 export type ExitReason = "take_profit" | "stop_loss" | "force_close" | "eod";
 
@@ -29,6 +30,10 @@ export interface Settings {
   /** 成行（新規・損切り・強制決済）に不利方向へ加えるティック数 */
   slippageTicks: number;
   commissionPerOrderYen: number;
+  /** 新規の出し方。market は次の足の始値で成行、limit はシグナルが出た足の終値に指値を置く */
+  entryOrder: EntryOrder;
+  /** 指値が約定しないまま何本の足で取り消すか */
+  limitWaitBars: number;
   allowShort: boolean;
   /** "HH:MM"（JST）。これ以降は新規発注しない */
   noEntryAfter: string;
@@ -55,6 +60,8 @@ export const DEFAULT_SETTINGS: Settings = {
   maxTradesPerDay: 3,
   slippageTicks: 1,
   commissionPerOrderYen: 0,
+  entryOrder: "market",
+  limitWaitBars: 3,
   allowShort: false,
   noEntryAfter: "14:30",
   forceCloseAt: "15:20",
@@ -100,7 +107,7 @@ export interface DayState {
   halted: HaltReason | null;
   position: Position | null;
   /** 次の足の始値で約定させる注文 */
-  pending: (Signal & { symbol: string }) | null;
+  pending: (Signal & { symbol: string; limit?: { price: number; barsLeft: number } }) | null;
   bars: Record<string, Bar[]>;
 }
 
@@ -140,6 +147,7 @@ export function parseSettings(input: unknown, base: Settings = DEFAULT_SETTINGS)
   num("maxTradesPerDay", 1, 100, true);
   num("slippageTicks", 0, 20, true);
   num("commissionPerOrderYen", 0, 1e5);
+  num("limitWaitBars", 1, 100, true);
   num("orbMinutes", 5, 120, true);
   num("orbRewardRisk", 0.1, 10);
   num("vwapK", 0.5, 5);
@@ -149,6 +157,10 @@ export function parseSettings(input: unknown, base: Settings = DEFAULT_SETTINGS)
   if ("strategy" in src) {
     if (src.strategy !== "orb" && src.strategy !== "vwap") throw new Error('strategy must be "orb" or "vwap"');
     out.strategy = src.strategy;
+  }
+  if ("entryOrder" in src) {
+    if (src.entryOrder !== "market" && src.entryOrder !== "limit") throw new Error('entryOrder must be "market" or "limit"');
+    out.entryOrder = src.entryOrder;
   }
   if ("symbols" in src) {
     const v = src.symbols;

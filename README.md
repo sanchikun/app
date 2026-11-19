@@ -55,6 +55,7 @@ npm run deploy
 npm run backtest -- 7203                                  # 5分足 × 60日、寄り付きレンジ突破
 npm run backtest -- 7203 --strategy vwap --slippage 0
 npm run backtest -- 7203 --interval 1m --range 7d
+npm run backtest -- 7203 --entry limit --limit-wait 3     # 新規を指値にする
 npm run backtest -- 7203 --synthetic                      # 合成データ（動作確認用）
 ```
 
@@ -104,6 +105,7 @@ npm run screen -- --cache .cache --csv out.csv    # 取得した足を保存し�
 | `maxTradesPerDay` | 3 | 1日の取引回数の上限 |
 | `slippageTicks` | 1 | 成行注文に加える不利な滑り（ティック数） |
 | `commissionPerOrderYen` | 0 | 1注文あたりの手数料 |
+| `entryOrder`、`limitWaitBars` | `market`、3 | 新規の出し方（`market` は成行、`limit` は指値）、指値が約定しないとき何本の足で取り消すか |
 | `allowShort` | false | 空売りを使うか |
 | `noEntryAfter` | 14:30 | これ以降は新規発注しない |
 | `forceCloseAt` | 15:20 | これ以降の足の始値で強制決済する |
@@ -117,6 +119,7 @@ npm run screen -- --cache .cache --csv out.csv    # 取得した足を保存し�
 - シグナルは足の確定時に出て、**次の足の始値**で約定します。未来の値は見ません。
 - 損切りと利確は足の高値・安値で判定します。同じ足で両方に届いたときは損切りを優先します。
 - 新規・損切り・強制決済は成行として滑りを加えます。利確は指値として滑りなしです。
+- `entryOrder` を `limit` にすると、新規はシグナルが出た足の終値に指値を置きます。以降の足がその値を1ティックでも抜けたら指値の値段で約定とみなし、同値に触れただけでは約定としません。約定した足では利確を判定しません。
 - 板の厚さや約定の順番待ちは再現していません。実際より有利に出ることがあります。
 
 ## 注意点

@@ -6,6 +6,7 @@
  *   npm run screen -- --loss-limit 3000 --slippage 0
  *   npm run screen -- --csv out.csv                  # 銘柄×日の明細を書き出す
  *   npm run screen -- --cache .cache                 # 取得した足を保存し、次回はそれを使う
+ *   npm run screen -- --entry limit --limit-wait 3   # 新規を指値にする
  *   npm run screen -- --max-stop-fit 1               # 損切りが損失枠で狭められる日を集計から外す
  *
  * 既定の銘柄はすべて TOPIX500 構成銘柄（細かい呼値）として計算する。
@@ -41,6 +42,8 @@ const overrides: Record<string, unknown> = { fineTickSymbols: args.includes("--s
 if (flag("strategy")) overrides.strategy = flag("strategy");
 if (flag("slippage")) overrides.slippageTicks = Number(flag("slippage"));
 if (flag("loss-limit")) overrides.dailyLossLimitYen = Number(flag("loss-limit"));
+if (flag("entry")) overrides.entryOrder = flag("entry");
+if (flag("limit-wait")) overrides.limitWaitBars = Number(flag("limit-wait"));
 if (args.includes("--allow-short")) overrides.allowShort = true;
 const settings = parseSettings(overrides, DEFAULT_SETTINGS);
 const synthetic = args.includes("--synthetic");
@@ -108,7 +111,7 @@ for (const symbol of symbols) {
 
 const row = (cells: string[], widths: number[]) => cells.map((c, i) => (i === 0 ? c.padEnd(widths[i]) : c.padStart(widths[i]))).join("  ");
 
-console.log(`${settings.strategy}  ${interval} × ${range}  ${synthetic ? "【合成データ】" : "Yahoo Finance"}  損失上限 ${settings.dailyLossLimitYen}円  滑り ${settings.slippageTicks}ティック  ${settings.shares}株`);
+console.log(`${settings.strategy}${settings.entryOrder === "limit" ? `（指値・${settings.limitWaitBars}本待ち）` : ""}  ${interval} × ${range}  ${synthetic ? "【合成データ】" : "Yahoo Finance"}  損失上限 ${settings.dailyLossLimitYen}円  滑り ${settings.slippageTicks}ティック  ${settings.shares}株`);
 console.log(`銘柄 ${lastPrice.size}/${symbols.length}  銘柄×日 ${observations.length}`);
 for (const f of failed) console.log(`対象外 ${f}`);
 if (offTick.length) console.log(`注意: 株価が呼値の刻みに合わない日を除きました（${offTick.join("、")}）。株式分割の前か、TOPIX500 構成銘柄でない可能性があります。`);
