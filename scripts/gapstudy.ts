@@ -8,13 +8,10 @@
  * 分足のバックテストとの違い: 最初の足を待たずに始値で買う。高値と安値の順番が分からないので、
  * 利確と損切りの両方に届いた日は損切りとする。15:20 の強制決済ではなく終値で決済する。
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { gapFadeDaily, summarize } from "../src/core/gapstudy";
-import type { DailyBar, GapSummary, GapTrade } from "../src/core/gapstudy";
-import { jstDate } from "../src/core/market";
+import type { GapSummary, GapTrade } from "../src/core/gapstudy";
 import { normalizeSymbol } from "../src/core/types";
-import { yahooDaily } from "../src/data/provider";
-import { DEFAULT_SYMBOLS } from "./universe";
+import { DEFAULT_SYMBOLS, loadDaily } from "./universe";
 
 const args = process.argv.slice(2);
 const flag = (name: string) => {
@@ -26,29 +23,8 @@ const range = flag("range") ?? "10y";
 const minGapPct = Number(flag("gap") ?? 1);
 const slippageTicks = Number(flag("slippage") ?? 1);
 const cacheDir = flag("cache");
-const today = jstDate(Math.floor(Date.now() / 1000));
 
-async function load(symbol: string): Promise<DailyBar[]> {
-  const file = cacheDir ? `${cacheDir}/${symbol}-1d-${range}.json` : null;
-  if (file && existsSync(file)) return JSON.parse(readFileSync(file, "utf8")) as DailyBar[];
-  const bars = await yahooDaily(symbol, range);
-  if (file) {
-    mkdirSync(cacheDir!, { recursive: true });
-    writeFileSync(file, JSON.stringify(bars));
-  }
-  await new Promise((r) => setTimeout(r, 300));
-  return bars;
-}
-
-const data: [string, DailyBar[]][] = [];
-for (const symbol of symbols) {
-  try {
-    // 当日の足は取引の途中かもしれないので使わない
-    data.push([symbol, (await load(symbol)).filter((b) => b.date < today)]);
-  } catch (e) {
-    console.log(`取得失敗 ${symbol}: ${e instanceof Error ? e.message : String(e)}`);
-  }
-}
+const data = await loadDaily(symbols, range, cacheDir);
 if (data.length === 0) process.exit(1);
 
 const run = (gap: number, useStops: boolean, slip = slippageTicks) => data.flatMap(([symbol, bars]) => gapFadeDaily(symbol, bars, { minGapPct: gap, slippageTicks: slip, useStops }));

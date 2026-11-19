@@ -102,3 +102,38 @@ describe("ギャップ埋めの日足検証", async () => {
     expect(bars).toEqual([{ date: "2026-09-29", o: 100, h: 101, l: 99, c: 100, dividend: 2.5 }]);
   });
 });
+
+describe("日足のルール検証", async () => {
+  const { DAILY_RULES, marketGaps, runRule } = await import("../src/core/dailystudy");
+  const rule = (key: string) => DAILY_RULES.find((r) => r.key === key)!;
+  const d0 = { date: "2026-11-02", o: 2000, h: 2010, l: 1990, c: 2000 };
+  const run = (key: string, day: object) => {
+    const bars = [d0, { date: "2026-11-04", o: 2000, h: 2000, l: 2000, c: 2000, ...day }];
+    return runRule(rule(key), "X", bars, marketGaps([["X", bars]]));
+  };
+
+  it("寄り付きで入るルールは始値から終値までの損益率になる", () => {
+    expect(run("gap-down", { o: 1970, h: 1990, l: 1960, c: 1989.7 })[0].ret).toBeCloseTo(19.7 / 1970);
+    expect(run("gap-down", { o: 1990, h: 1995, l: 1985, c: 1990 })).toHaveLength(0);
+    expect(run("gap-up", { o: 2030, h: 2040, l: 2010, c: 2020 })[0].ret).toBeCloseTo(10 / 2030);
+  });
+
+  it("逆指値は1ティック抜けたら滑りを加えて約定する", () => {
+    // 前日高値 2010、細かい呼値は0.5円。2010.5 で発動し 2011 で約定
+    expect(run("break-high", { h: 2010, c: 2005 })).toHaveLength(0);
+    expect(run("break-high", { h: 2020, c: 2015 })[0].ret).toBeCloseTo(4 / 2011);
+    expect(run("break-high", { o: 2015, h: 2020, l: 2012, c: 2018 })[0].ret).toBeCloseTo(3 / 2015);
+  });
+
+  it("指値は1ティック以上抜けた日だけ、指値の値段で約定する", () => {
+    // 前日安値 1990 に買い指値
+    expect(run("fade-low", { l: 1990, c: 1995 })).toHaveLength(0);
+    expect(run("fade-low", { l: 1989.5, c: 1995 })[0].ret).toBeCloseTo(5 / 1990);
+    expect(run("fade-low", { o: 1985, h: 1996, l: 1980, c: 1995 })[0].ret).toBeCloseTo(10 / 1985);
+  });
+
+  it("権利落ち日は配当の分だけ前日の値を下げて比べる", () => {
+    expect(run("fade-low", { o: 1985, h: 1986, l: 1975, c: 1980, dividend: 20 })[0].ret).toBeCloseTo(10 / 1970);
+    expect(run("gap-down", { o: 1975, h: 1980, l: 1970, c: 1978, dividend: 20 })).toHaveLength(0);
+  });
+});

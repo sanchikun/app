@@ -10,6 +10,7 @@
     "backtest": "tsx scripts/backtest.ts",
     "screen": "tsx scripts/screen.ts",
     "gapstudy": "tsx scripts/gapstudy.ts",
+    "dailystudy": "tsx scripts/dailystudy.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },

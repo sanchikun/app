@@ -86,7 +86,7 @@ export interface GapSummary {
   winDayRate: number | null;
 }
 
-export function summarize(trades: GapTrade[]): GapSummary {
+export function summarize<T extends { date: string; ret: number }>(trades: T[]): GapSummary {
   const byDay = new Map<string, number[]>();
   for (const t of trades) byDay.set(t.date, [...(byDay.get(t.date) ?? []), t.ret]);
   const dayMeans = [...byDay.values()].map((r) => r.reduce((a, x) => a + x, 0) / r.length);
