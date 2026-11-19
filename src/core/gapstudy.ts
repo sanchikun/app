@@ -11,6 +11,8 @@ export interface DailyBar {
   h: number;
   l: number;
   c: number;
+  /** 出来高（株） */
+  v?: number;
   dividend?: number;
 }
 

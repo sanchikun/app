@@ -65,7 +65,7 @@ interface YahooDailyChart {
   chart: {
     result?: {
       timestamp?: number[];
-      indicators: { quote: { open?: (number | null)[]; high?: (number | null)[]; low?: (number | null)[]; close?: (number | null)[] }[] };
+      indicators: { quote: { open?: (number | null)[]; high?: (number | null)[]; low?: (number | null)[]; close?: (number | null)[]; volume?: (number | null)[] }[] };
       events?: { dividends?: Record<string, { amount: number; date: number }> };
     }[];
     error?: { description?: string } | null;
@@ -88,7 +88,8 @@ export function parseYahooDaily(json: YahooDailyChart): DailyBar[] {
     if (o == null || h == null || l == null || c == null) continue;
     const date = jstDate(ts[i]);
     const dividend = dividends.get(date);
-    bars.push({ date, o, h, l, c, ...(dividend ? { dividend } : {}) });
+    const v = q.volume?.[i];
+    bars.push({ date, o, h, l, c, ...(v != null ? { v } : {}), ...(dividend ? { dividend } : {}) });
   }
   return bars;
 }
