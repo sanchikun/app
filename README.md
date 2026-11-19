@@ -58,6 +58,19 @@ npm run backtest -- 7203 --interval 1m --range 7d
 npm run backtest -- 7203 --synthetic                      # 合成データ（動作確認用）
 ```
 
+### 銘柄選びの検証
+
+複数銘柄でバックテストを回し、寄り付きレンジが確定した時点で分かる指標（ギャップ、出来高比、レンジ値幅など）とその日の損益の関係を集計します。境界は期間の前半で3等分して決め、後半にもそのまま当てはめるので、指標の選別力が続くかどうかを見られます。
+
+```bash
+npm run screen                                    # 既定の50銘柄、5分足 × 60日、寄り付きレンジ突破
+npm run screen -- --symbols 7203,6758,9984        # 銘柄を指定
+npm run screen -- --loss-limit 3000 --max-stop-fit 1   # 損切りが損失枠で狭められる日を集計から外す
+npm run screen -- --cache .cache --csv out.csv    # 取得した足を保存して再利用、銘柄×日の明細を書き出す
+```
+
+既定の銘柄はすべて TOPIX500 構成銘柄（細かい呼値）として計算します。株価が呼値の刻みに乗らない日（株式分割より前の調整済みの値など）は自動で除きます。
+
 ### ペーパートレード
 
 画面の「開始する」を押すか `POST /api/bot/start` を呼ぶと、平日 9:00〜16:59（JST）に毎分動きます。対象銘柄や金額は `PUT /api/settings` で変えます。
@@ -119,7 +132,7 @@ npm run backtest -- 7203 --synthetic                      # 合成データ（�
 src/core/      売買エンジン、戦略、バックテスト、市場の時刻・呼値
 src/data/      株価データの取得（Yahoo、合成）
 src/worker/    API と定期実行、D1 への保存、画面（index.html）
-scripts/       コマンドライン用バックテスト
+scripts/       コマンドライン用バックテスト、銘柄選びの検証
 migrations/    D1 のスキーマ
 test/          テスト
 ```

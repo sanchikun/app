@@ -8,6 +8,7 @@
     "db:migrate:local": "wrangler d1 migrations apply daytrade --local",
     "db:migrate:remote": "wrangler d1 migrations apply daytrade --remote",
     "backtest": "tsx scripts/backtest.ts",
+    "screen": "tsx scripts/screen.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },

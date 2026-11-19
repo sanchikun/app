@@ -1,4 +1,4 @@
-import { jstDate, roundToTick } from "../core/market";
+import { cleanPrice, jstDate, roundToTick } from "../core/market";
 import type { Bar } from "../core/types";
 
 export type Interval = "1m" | "5m" | "15m";
@@ -36,7 +36,8 @@ export function parseYahooChart(json: YahooChart): Bar[] {
     const c = q.close?.[i];
     // 取引のなかった足は null で返ってくる
     if (o == null || h == null || l == null || c == null) continue;
-    bars.push({ t: ts[i], o, h, l, c, v: q.volume?.[i] ?? 0 });
+    // 値は単精度で返ってくる（162.4 が 162.39999389648438 になる）ので、0.1円刻みに戻す
+    bars.push({ t: ts[i], o: cleanPrice(o), h: cleanPrice(h), l: cleanPrice(l), c: cleanPrice(c), v: q.volume?.[i] ?? 0 });
   }
   return bars;
 }
