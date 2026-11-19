@@ -1,4 +1,6 @@
 /** 1本の足。t は足の開始時刻（UNIX秒）。 */
+import type { OpenQuote } from "./gapopen";
+
 export interface Bar {
   t: number;
   o: number;
@@ -70,8 +72,13 @@ export interface Settings {
   overnightSymbols: string[];
 }
 
-/** 対象銘柄の上限。1回の定期実行で銘柄ごとに1回ずつ株価を取りにいく */
-export const MAX_SYMBOLS = 20;
+/**
+ * 対象銘柄の上限。日足で動かす戦略（安寄り買い、持ち越し）は、株価を1回の定期実行で少しずつ順に取りにいくので多くてよい。
+ * 分足で動かす戦略は毎分すべての銘柄を取りにいくので、MAX_INTRADAY_SYMBOLS まで。
+ */
+export const MAX_SYMBOLS = 300;
+export const MAX_INTRADAY_SYMBOLS = 20;
+const DAILY_STRATEGIES: readonly StrategyName[] = ["gapopen", "overnight", "gapopen_overnight"];
 
 export const DEFAULT_SETTINGS: Settings = {
   enabled: false,
@@ -151,6 +158,10 @@ export interface DayState {
   decided?: string[];
   /** 持ち越しで、その日の大引けに買うかどうかを決め終えたか */
   overnightDecided?: boolean;
+  /** 安寄り買い: 寄り値を取り終えたが、まだ入るかどうかを判断していない銘柄の値 */
+  gathered?: Record<string, OpenQuote>;
+  /** 安寄り買い: 次にどの銘柄から株価を取りにいくか */
+  fetchCursor?: number;
 }
 
 function isHHMM(v: unknown): v is string {
@@ -221,8 +232,8 @@ export function parseSettings(input: unknown, base: Settings = DEFAULT_SETTINGS)
   }
   if ("overnightSymbols" in src) {
     const v = src.overnightSymbols;
-    if (!Array.isArray(v) || v.length > MAX_SYMBOLS || !v.every((s) => typeof s === "string")) {
-      throw new Error(`overnightSymbols must be an array of up to ${MAX_SYMBOLS} strings`);
+    if (!Array.isArray(v) || v.length > MAX_INTRADAY_SYMBOLS || !v.every((s) => typeof s === "string")) {
+      throw new Error(`overnightSymbols must be an array of up to ${MAX_INTRADAY_SYMBOLS} strings`);
     }
     out.overnightSymbols = (v as string[]).map(normalizeSymbol);
   }
@@ -237,6 +248,9 @@ export function parseSettings(input: unknown, base: Settings = DEFAULT_SETTINGS)
       throw new Error("fineTickSymbols must be an array of strings");
     }
     out.fineTickSymbols = (v as string[]).map(normalizeSymbol);
+  }
+  if (!DAILY_STRATEGIES.includes(out.strategy) && out.symbols.length > MAX_INTRADAY_SYMBOLS) {
+    throw new Error(`strategy ${out.strategy} supports up to ${MAX_INTRADAY_SYMBOLS} symbols (gapopen, overnight and gapopen_overnight support ${MAX_SYMBOLS})`);
   }
   return out;
 }

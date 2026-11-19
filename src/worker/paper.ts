@@ -112,6 +112,11 @@ export async function paperTick(db: D1Database, provider: DataProvider, now: num
   return { date, processedBars: queue.length, trades, errors };
 }
 
+/** 1回の定期実行で株価を取りにいく銘柄数。Workers の外部リクエスト数の上限（無料プランは1回50）に収める */
+const FETCH_BATCH = 30;
+/** 安寄り買い: この時刻（JST、分）を過ぎたら、寄り値がそろっていなくても取れた銘柄で判断する。株価は約20分遅れで届く */
+const GAP_DECIDE_BY = 9 * 60 + 45;
+
 /**
  * 日足で動かす戦略（安寄り買い、持ち越し）のペーパートレード。寄り付きと大引けの値が分足にないので、
  * 日足（取引中の当日の足を含む）を毎分取りにいって、寄り付きでの売買、安値での損切り、大引けでの売買を判定する。
@@ -152,25 +157,43 @@ async function dailyPaperTick(db: D1Database, provider: DataProvider, settings: 
 
   // 大引けから30分以上たてば、遅延データでも終値が確定している
   const dayComplete = jstMinutes(now) >= SESSION_CLOSE + 30;
-  const decided = state.decided ?? [];
-  const wanted = new Set<string>();
-  if (runsGapOpen(settings)) for (const sym of settings.symbols) if (!decided.includes(sym)) wanted.add(sym);
-  if (runsOvernight(settings) && dayComplete && !state.overnightDecided) for (const sym of overnightSymbols(settings)) wanted.add(sym);
-  if (state.position) wanted.add(state.position.symbol);
-  const quotes: Record<string, OpenQuote> = {};
-  for (const symbol of wanted) {
+  const before = JSON.stringify(state);
+  const fetched: Record<string, OpenQuote> = {};
+  const fetchQuote = async (symbol: string) => {
+    if (symbol in fetched) return;
     try {
       const bars = await provider.daily(symbol, "5d", now);
       const i = bars.findIndex((b) => b.date === date);
       const q = i >= 1 ? openQuote(bars, i) : null;
-      if (q) quotes[symbol] = q;
+      if (q) fetched[symbol] = q;
     } catch (e) {
       errors.push(`${symbol}: ${e instanceof Error ? e.message : String(e)}`);
     }
-  }
+  };
+  if (state.position) await fetchQuote(state.position.symbol);
+  if (runsOvernight(settings) && dayComplete && !state.overnightDecided) for (const sym of overnightSymbols(settings).slice(0, FETCH_BATCH)) await fetchQuote(sym);
 
-  const before = JSON.stringify(state);
-  const trades = dailyTick(state, settings, quotes, now, dayComplete);
+  // 安寄り買い: 寄り値をまだ取れていない銘柄を、1回に FETCH_BATCH ずつ順に取りにいく。全銘柄がそろう（または
+  // GAP_DECIDE_BY を過ぎる）まで判断を待つので、何回に分けて取っても「ギャップが最も大きい1銘柄」を選べる
+  let ready = true;
+  if (runsGapOpen(settings)) {
+    const decided = state.decided ?? [];
+    const gathered = (state.gathered ??= {});
+    const waiting = () => settings.symbols.filter((sym) => !decided.includes(sym) && !(sym in gathered));
+    const pool = waiting();
+    const start = pool.length > FETCH_BATCH ? (state.fetchCursor ?? 0) % pool.length : 0;
+    for (const sym of [...pool.slice(start), ...pool.slice(0, start)].slice(0, FETCH_BATCH)) await fetchQuote(sym);
+    if (pool.length > FETCH_BATCH) state.fetchCursor = start + FETCH_BATCH;
+    for (const sym of pool) if (fetched[sym]) gathered[sym] = fetched[sym];
+    ready = waiting().length === 0 || jstMinutes(now) >= GAP_DECIDE_BY;
+  }
+  const quotes: Record<string, OpenQuote> = ready ? { ...state.gathered, ...fetched } : fetched;
+
+  // 寄り値がそろうまでは安寄り買いの判断をさせない（保有中の銘柄の損切りと決済は動かす）
+  const trades = dailyTick(state, ready ? settings : { ...settings, symbols: [] }, quotes, now, dayComplete);
+  // 判断が済んだ銘柄の値は捨てる（持ち越しの決済待ちで判断が先送りになった銘柄は残す）
+  for (const sym of Object.keys(state.gathered ?? {})) if (state.decided?.includes(sym)) delete state.gathered![sym];
+  if (state.gathered && Object.keys(state.gathered).length === 0) delete state.gathered;
   if (created || trades.length > 0 || JSON.stringify(state) !== before) statements.push(...saveStatements(db, state, trades));
   if (statements.length > 0) await db.batch(statements);
   return { date, processedBars: Object.keys(quotes).length, trades, errors };
