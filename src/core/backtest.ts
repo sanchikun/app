@@ -1,5 +1,5 @@
 import { finishDay, newDay, processBar } from "./engine";
-import { groupByDate, tickMismatchRate } from "./market";
+import { SESSION_OPEN, groupByDate, jstMinutes, tickMismatchRate } from "./market";
 import type { Bar, HaltReason, Settings, Trade } from "./types";
 
 export interface DayResult {
@@ -56,6 +56,8 @@ export interface BacktestResult {
   fineTick: boolean;
   /** 足の値が呼値の刻みに合わない割合が高い（fineTickSymbols の設定が銘柄と合っていない疑い） */
   tickMismatch: boolean;
+  /** 寄り付き（9:00）の足がなかった日数。データ元が返さない日があり、その日は寄り付きの値動きを見られない */
+  missingOpenDays: number;
   monthly: MonthResult[];
   daily: DayResult[];
   trades: Trade[];
@@ -66,7 +68,9 @@ export function runBacktest(symbol: string, bars: Bar[], settings: Settings): Ba
   const trades: Trade[] = [];
   const fine = settings.fineTickSymbols.includes(symbol);
   let prevClose: number | null = null;
+  let missingOpenDays = 0;
   for (const [date, dayBars] of groupByDate(bars)) {
+    if (jstMinutes(dayBars[0].t) !== SESSION_OPEN) missingOpenDays++;
     const state = newDay(date);
     if (prevClose != null) state.prevClose = { [symbol]: prevClose };
     prevClose = dayBars[dayBars.length - 1].c;
@@ -108,6 +112,7 @@ export function runBacktest(symbol: string, bars: Bar[], settings: Settings): Ba
     },
     fineTick: fine,
     tickMismatch: tickMismatchRate(bars, fine) > 0.2,
+    missingOpenDays,
     monthly: monthly(daily),
     daily,
     trades,

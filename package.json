@@ -9,6 +9,7 @@
     "db:migrate:remote": "wrangler d1 migrations apply daytrade --remote",
     "backtest": "tsx scripts/backtest.ts",
     "screen": "tsx scripts/screen.ts",
+    "gapstudy": "tsx scripts/gapstudy.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },

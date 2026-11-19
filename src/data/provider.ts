@@ -1,4 +1,5 @@
 import { cleanPrice, jstDate, roundToTick } from "../core/market";
+import type { DailyBar } from "../core/gapstudy";
 import type { Bar } from "../core/types";
 
 export type Interval = "1m" | "5m" | "15m";
@@ -56,6 +57,46 @@ export const yahoo: DataProvider = {
     return parseYahooChart(await res.json()).filter((b) => b.t % step === 0);
   },
 };
+
+interface YahooDailyChart {
+  chart: {
+    result?: {
+      timestamp?: number[];
+      indicators: { quote: { open?: (number | null)[]; high?: (number | null)[]; low?: (number | null)[]; close?: (number | null)[] }[] };
+      events?: { dividends?: Record<string, { amount: number; date: number }> };
+    }[];
+    error?: { description?: string } | null;
+  };
+}
+
+/** 日足と権利落ち日の配当。値は株式分割の調整済みで、呼値の刻みには乗らないことがある */
+export function parseYahooDaily(json: YahooDailyChart): DailyBar[] {
+  const result = json.chart.result?.[0];
+  if (!result) throw new Error(json.chart.error?.description ?? "no chart data");
+  const ts = result.timestamp ?? [];
+  const q = result.indicators.quote[0] ?? {};
+  const dividends = new Map(Object.values(result.events?.dividends ?? {}).map((d) => [jstDate(d.date), d.amount]));
+  const bars: DailyBar[] = [];
+  for (let i = 0; i < ts.length; i++) {
+    const o = q.open?.[i];
+    const h = q.high?.[i];
+    const l = q.low?.[i];
+    const c = q.close?.[i];
+    if (o == null || h == null || l == null || c == null) continue;
+    const date = jstDate(ts[i]);
+    const dividend = dividends.get(date);
+    bars.push({ date, o, h, l, c, ...(dividend ? { dividend } : {}) });
+  }
+  return bars;
+}
+
+/** Yahoo Finance の日足。range は "1y" "5y" "10y" など */
+export async function yahooDaily(symbol: string, range: string): Promise<DailyBar[]> {
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=${encodeURIComponent(range)}&events=div`;
+  const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0", Accept: "application/json" } });
+  if (!res.ok) throw new Error(`yahoo ${symbol}: HTTP ${res.status}`);
+  return parseYahooDaily(await res.json());
+}
 
 function mulberry32(seed: number): () => number {
   let a = seed >>> 0;

@@ -21,15 +21,7 @@ import { DEFAULT_SETTINGS, normalizeSymbol, parseSettings } from "../src/core/ty
 import type { Bar } from "../src/core/types";
 import { getProvider } from "../src/data/provider";
 import type { Interval, Range } from "../src/data/provider";
-
-/** 売買代金の大きい TOPIX500 構成銘柄（手作業のリスト。入れ替えは --symbols で） */
-const DEFAULT_SYMBOLS = [
-  "7203", "6758", "9984", "8306", "8316", "8411", "6861", "6501", "8035", "6857",
-  "9983", "7974", "6098", "4063", "8058", "8031", "8001", "9432", "9433", "9434",
-  "7267", "6902", "7011", "7012", "7013", "6146", "6920", "4502", "4568", "6367",
-  "6981", "6954", "6273", "7741", "4661", "8766", "6503", "6702", "6701", "5803",
-  "7751", "2914", "9101", "9104", "8053", "6723", "4519", "6752", "7201", "5401",
-];
+import { DEFAULT_SYMBOLS } from "./universe";
 
 const args = process.argv.slice(2);
 const flag = (name: string) => {
@@ -82,6 +74,7 @@ let observations: Observation[] = [];
 const lastPrice = new Map<string, number>();
 const failed: string[] = [];
 const offTick: string[] = [];
+let missingOpen = 0;
 
 for (const symbol of symbols) {
   let bars: Bar[];
@@ -107,6 +100,7 @@ for (const symbol of symbols) {
   }
 
   const result = runBacktest(symbol, kept, settings);
+  missingOpen += result.missingOpenDays;
   const byDate = new Map<string, { pnls: number[]; rets: number[] }>();
   for (const t of result.trades) {
     const d = byDate.get(t.date) ?? { pnls: [], rets: [] };
@@ -125,6 +119,7 @@ console.log(`${settings.strategy}${settings.entryOrder === "limit" ? `（指値�
 console.log(`銘柄 ${lastPrice.size}/${symbols.length}  銘柄×日 ${observations.length}`);
 for (const f of failed) console.log(`対象外 ${f}`);
 if (offTick.length) console.log(`注意: 株価が呼値の刻みに合わない日を除きました（${offTick.join("、")}）。株式分割の前か、TOPIX500 構成銘柄でない可能性があります。`);
+if (missingOpen > 0) console.log(`注意: 銘柄×日 ${observations.length} のうち ${missingOpen} は 9:00 の足がありません。その日は 9:05 以降の足だけで計算しています。`);
 if (observations.length === 0) process.exit(1);
 
 const line = (b: BucketStats) => `${b.label}  銘柄×日 ${b.days}  取引 ${b.trades}回  合計 ${yen(b.pnl)}  勝率 ${pct(b.winRate)}  PF ${pf(b.profitFactor)}  平均 ${b.avgRetBp == null ? "-" : `${b.avgRetBp >= 0 ? "+" : ""}${b.avgRetBp.toFixed(1)}bp`}/取引`;

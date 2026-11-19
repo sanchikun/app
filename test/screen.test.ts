@@ -65,3 +65,40 @@ describe("parseYahooChart", () => {
     expect(bars[0]).toMatchObject({ o: 162.4, h: 162.4, l: 162.4, c: 162.4 });
   });
 });
+
+describe("ギャップ埋めの日足検証", async () => {
+  const { gapFadeDaily, summarize } = await import("../src/core/gapstudy");
+  const { parseYahooDaily } = await import("../src/data/provider");
+  const opt = { minGapPct: 1, slippageTicks: 0, useStops: true };
+  const prev = { date: "2026-11-02", o: 2000, h: 2000, l: 2000, c: 2000 };
+
+  it("前日終値に届けば利確、同じ幅だけ下げれば損切り、どちらでもなければ終値", () => {
+    const t = (b: object) => gapFadeDaily("X", [prev, { date: "2026-11-04", o: 1960, h: 1960, l: 1960, c: 1960, ...b }], opt)[0];
+    expect(t({ h: 2001, c: 1990 })).toMatchObject({ exit: "target", gapPct: -2 });
+    expect(t({ h: 2001, c: 1990 }).ret).toBeCloseTo(40 / 1960);
+    expect(t({ h: 2001, l: 1920 })).toMatchObject({ exit: "stop" }); // 両方に届いた日は損切り
+    expect(t({ h: 1985, c: 1980 }).ret).toBeCloseTo(20 / 1960);
+  });
+
+  it("ギャップが小さい日は入らず、権利落ち日は配当を引いて測る", () => {
+    expect(gapFadeDaily("X", [prev, { date: "2026-11-04", o: 1985, h: 1990, l: 1980, c: 1985 }], opt)).toHaveLength(0);
+    expect(gapFadeDaily("X", [prev, { date: "2026-11-04", o: 1975, h: 1980, l: 1970, c: 1975, dividend: 20 }], opt)).toHaveLength(0);
+  });
+
+  it("同じ日の取引は1つにまとめて平均する", () => {
+    const s = summarize([
+      { symbol: "A", date: "d1", gapPct: -1, ret: 0.01, exit: "target" },
+      { symbol: "B", date: "d1", gapPct: -1, ret: 0.03, exit: "target" },
+      { symbol: "A", date: "d2", gapPct: -1, ret: -0.01, exit: "stop" },
+    ]);
+    expect(s).toMatchObject({ trades: 3, days: 2, profitFactor: 4, winDayRate: 0.5 });
+    expect(s.avgBp).toBeCloseTo(100);
+    expect(s.avgDayBp).toBeCloseTo(50);
+  });
+
+  it("日足に権利落ち日の配当を付ける", () => {
+    const t = Date.UTC(2026, 8, 29) / 1000;
+    const bars = parseYahooDaily({ chart: { result: [{ timestamp: [t], indicators: { quote: [{ open: [100], high: [101], low: [99], close: [100] }] }, events: { dividends: { [t]: { amount: 2.5, date: t } } } }] } });
+    expect(bars).toEqual([{ date: "2026-09-29", o: 100, h: 101, l: 99, c: 100, dividend: 2.5 }]);
+  });
+});

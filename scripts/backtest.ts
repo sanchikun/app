@@ -52,5 +52,6 @@ console.log(
   `取引 ${s.trades}回  勝率 ${s.winRate == null ? "-" : `${(s.winRate * 100).toFixed(1)}%`}  PF ${s.profitFactor == null ? "-" : s.profitFactor.toFixed(2)}  最大DD ${yen(-s.maxDrawdown)}  最悪日 ${yen(s.worstDay)}  最良日 ${yen(s.bestDay)}`,
 );
 if (result.tickMismatch) console.log(`注意: 株価が${result.fineTick ? "細かい" : "通常の"}呼値の刻みに合っていません。fineTickSymbols の設定を確認してください（--fine-tick / --standard-tick）。`);
+if (result.missingOpenDays > 0) console.log(`注意: ${s.days}日のうち${result.missingOpenDays}日は 9:00 の足がありません。その日は 9:05 以降の足だけで計算しています。`);
 for (const m of result.monthly) console.log(`  ${m.month}  ${yen(m.pnl).padStart(8)}  ${m.days}日  ${m.trades}回`);
 for (const d of result.daily) console.log(`  ${d.date}  ${yen(d.pnl).padStart(8)}  ${d.trades}回  ${d.halted ?? ""}`);
