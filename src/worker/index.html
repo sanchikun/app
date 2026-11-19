@@ -65,7 +65,7 @@
     <h2>バックテスト</h2>
     <form id="bt" class="row">
       <label>銘柄コード<input name="symbol" value="7203" required></label>
-      <label>戦略<select name="strategy"><option value="orb">寄り付きレンジ突破</option><option value="vwap">VWAP逆張り</option><option value="momentum">後場順張り</option><option value="gapfade">ギャップ埋め</option><option value="pullback">VWAP押し目買い</option><option value="gapopen">安寄り買い（日足）</option></select></label>
+      <label>戦略<select name="strategy"><option value="orb">寄り付きレンジ突破</option><option value="vwap">VWAP逆張り</option><option value="momentum">後場順張り</option><option value="gapfade">ギャップ埋め</option><option value="pullback">VWAP押し目買い</option><option value="gapopen">安寄り買い（日足）</option><option value="overnight">上げた日の持ち越し（日足）</option><option value="gapopen_overnight">安寄り買い＋持ち越し（日足）</option></select></label>
       <label>足<select name="interval"><option value="5m">5分足 × 60日</option><option value="1m">1分足 × 7日</option></select></label>
       <label>滑り（ティック）<input name="slippage" type="number" min="0" max="20" value="1"></label>
       <label>データ<select name="source"><option value="">実データ</option><option value="synthetic">合成（動作確認用）</option></select></label>
@@ -95,7 +95,7 @@ const yen = (n) => `${n >= 0 ? "+" : "−"}${Math.abs(Math.round(n)).toLocaleStr
 const cls = (n) => (n > 0 ? "up" : n < 0 ? "down" : "");
 const time = (t) => new Date(t * 1000).toLocaleTimeString("ja-JP", { timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit" });
 const HALT = { target: "目標達成で停止", loss_limit: "損失上限で停止", max_trades: "取引回数の上限で停止" };
-const REASON = { take_profit: "利確", stop_loss: "損切り", force_close: "強制決済", eod: "大引け決済" };
+const REASON = { take_profit: "利確", stop_loss: "損切り", force_close: "強制決済", eod: "大引け決済", next_open: "翌朝の寄りで決済" };
 const SIDE = { long: "買い", short: "売り" };
 
 try { $("token").value = localStorage.getItem("token") ?? ""; } catch {}

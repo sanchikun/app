@@ -9,11 +9,11 @@ export interface Bar {
 }
 
 export type Side = "long" | "short";
-export const STRATEGY_NAMES = ["orb", "vwap", "momentum", "gapfade", "pullback", "gapopen"] as const;
+export const STRATEGY_NAMES = ["orb", "vwap", "momentum", "gapfade", "pullback", "gapopen", "overnight", "gapopen_overnight"] as const;
 export type StrategyName = (typeof STRATEGY_NAMES)[number];
 export type EntryOrder = "market" | "limit";
 export type HaltReason = "target" | "loss_limit" | "max_trades";
-export type ExitReason = "take_profit" | "stop_loss" | "force_close" | "eod";
+export type ExitReason = "take_profit" | "stop_loss" | "force_close" | "eod" | "next_open";
 
 export interface Settings {
   /** ペーパートレードの稼働フラグ */
@@ -56,6 +56,10 @@ export interface Settings {
   gapStopPct: number;
   /** 安寄り買い: 1回の買付金額（株価×株数）がこれを超える銘柄は見送る。0 なら上限なし */
   maxPositionYen: number;
+  /** 持ち越し: 場中（始値から終値）の上げがこの%以上の銘柄を大引けで買う */
+  overnightMinPct: number;
+  /** 持ち越し: 1回の買付金額の上限。損切りを置けないので小さめにする。0 なら maxPositionYen と同じ */
+  overnightMaxPositionYen: number;
 }
 
 /** 対象銘柄の上限。1回の定期実行で銘柄ごとに1回ずつ株価を取りにいく */
@@ -85,6 +89,8 @@ export const DEFAULT_SETTINGS: Settings = {
   gapMinPct: 1,
   gapStopPct: 0.5,
   maxPositionYen: 0,
+  overnightMinPct: 2,
+  overnightMaxPositionYen: 0,
 };
 
 export interface Signal {
@@ -101,6 +107,8 @@ export interface Position {
   entryPrice: number;
   stop: number;
   target: number;
+  /** 大引けで買って翌朝の寄り付きで売る持ち越しのポジションか */
+  overnight?: boolean;
 }
 
 export interface Trade {
@@ -129,6 +137,8 @@ export interface DayState {
   prevClose?: Record<string, number>;
   /** 安寄り買いで、その日の寄り付きを見て入るかどうかを決め終えた銘柄 */
   decided?: string[];
+  /** 持ち越しで、その日の大引けに買うかどうかを決め終えたか */
+  overnightDecided?: boolean;
 }
 
 function isHHMM(v: unknown): v is string {
@@ -176,6 +186,8 @@ export function parseSettings(input: unknown, base: Settings = DEFAULT_SETTINGS)
   num("gapMinPct", 0.1, 20);
   num("gapStopPct", 0.1, 10);
   num("maxPositionYen", 0, 1e9);
+  num("overnightMinPct", 0, 20);
+  num("overnightMaxPositionYen", 0, 1e9);
   time("noEntryAfter");
   time("forceCloseAt");
   if ("strategy" in src) {

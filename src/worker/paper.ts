@@ -1,5 +1,5 @@
 import { closePosition, finishDay, newDay, processBar } from "../core/engine";
-import { gapOpenTick, jstTime, openQuote } from "../core/gapopen";
+import { dailyTick, isDailyStrategy, jstTime, openQuote, runsGapOpen, runsOvernight } from "../core/gapopen";
 import type { OpenQuote } from "../core/gapopen";
 import { SESSION_CLOSE, inSession, jstDate, jstMinutes } from "../core/market";
 import { DEFAULT_SETTINGS, parseSettings } from "../core/types";
@@ -61,7 +61,7 @@ export async function paperTick(db: D1Database, provider: DataProvider, now: num
   const settings = await getSettings(db);
   if (!settings.enabled) return { date, skipped: "disabled", processedBars: 0, trades: [], errors: [] };
 
-  if (settings.strategy === "gapopen") return gapOpenPaperTick(db, provider, settings, now);
+  if (isDailyStrategy(settings)) return dailyPaperTick(db, provider, settings, now);
 
   const statements: D1PreparedStatement[] = [];
   let state = await getDay(db, date);
@@ -113,24 +113,31 @@ export async function paperTick(db: D1Database, provider: DataProvider, now: num
 }
 
 /**
- * 安寄り買いのペーパートレード。寄り付きと大引けの値が分足にないので、日足（取引中の当日の足を含む）で動かす。
- * 寄り付いた銘柄から順に入るかどうかを決め、保有中は安値で損切りを、大引け後は終値での決済を判定する。
+ * 日足で動かす戦略（安寄り買い、持ち越し）のペーパートレード。寄り付きと大引けの値が分足にないので、
+ * 日足（取引中の当日の足を含む）を毎分取りにいって、寄り付きでの売買、安値での損切り、大引けでの売買を判定する。
  */
-async function gapOpenPaperTick(db: D1Database, provider: DataProvider, settings: Settings, now: number): Promise<TickResult> {
+async function dailyPaperTick(db: D1Database, provider: DataProvider, settings: Settings, now: number): Promise<TickResult> {
   const date = jstDate(now);
   const statements: D1PreparedStatement[] = [];
   const errors: string[] = [];
   let state = await getDay(db, date);
+  let created = false;
   if (!state) {
     state = newDay(date);
-    // 前営業日のポジションが残っていたら（大引け後の処理が動かなかった場合）、その日の日足で決済する
+    created = true;
     const prev = await db
       .prepare("SELECT state_json FROM days WHERE date < ? ORDER BY date DESC LIMIT 1")
       .bind(date)
       .first<{ state_json: string }>();
     const prevState = prev ? (JSON.parse(prev.state_json) as DayState) : null;
     const pos = prevState?.position;
-    if (prevState && pos) {
+    if (prevState && pos?.overnight) {
+      // 持ち越しのポジションは今日の状態に移し、今日の寄り付きで決済する（損益は決済した日に付く）
+      state.position = pos;
+      prevState.position = null;
+      statements.push(...saveStatements(db, prevState, []));
+    } else if (prevState && pos) {
+      // 安寄り買いのポジションが残っていたら（大引け後の処理が動かなかった場合）、その日の日足で決済する
       try {
         const bar = (await provider.daily(pos.symbol, "1mo", now)).find((b) => b.date === prevState.date);
         if (!bar) throw new Error(`${prevState.date} の日足がありません`);
@@ -146,7 +153,9 @@ async function gapOpenPaperTick(db: D1Database, provider: DataProvider, settings
   // 大引けから30分以上たてば、遅延データでも終値が確定している
   const dayComplete = jstMinutes(now) >= SESSION_CLOSE + 30;
   const decided = state.decided ?? [];
-  const wanted = new Set(settings.symbols.filter((sym) => !decided.includes(sym)));
+  const wanted = new Set<string>();
+  if (runsGapOpen(settings)) for (const sym of settings.symbols) if (!decided.includes(sym)) wanted.add(sym);
+  if (runsOvernight(settings) && dayComplete && !state.overnightDecided) for (const sym of settings.symbols) wanted.add(sym);
   if (state.position) wanted.add(state.position.symbol);
   const quotes: Record<string, OpenQuote> = {};
   for (const symbol of wanted) {
@@ -160,11 +169,9 @@ async function gapOpenPaperTick(db: D1Database, provider: DataProvider, settings
     }
   }
 
-  const before = decided.length;
-  const hadPosition = state.position != null;
-  const trades = gapOpenTick(state, settings, quotes, now, dayComplete);
-  const changed = trades.length > 0 || (state.decided?.length ?? 0) !== before || (state.position != null) !== hadPosition;
-  if (changed) statements.push(...saveStatements(db, state, trades));
+  const before = JSON.stringify(state);
+  const trades = dailyTick(state, settings, quotes, now, dayComplete);
+  if (created || trades.length > 0 || JSON.stringify(state) !== before) statements.push(...saveStatements(db, state, trades));
   if (statements.length > 0) await db.batch(statements);
   return { date, processedBars: Object.keys(quotes).length, trades, errors };
 }

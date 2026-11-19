@@ -18,7 +18,7 @@ const flag = (name: string) => {
 };
 const symbolArg = args[0];
 if (!symbolArg || symbolArg.startsWith("--")) {
-  console.error("usage: npm run backtest -- <symbol> [--interval 5m] [--range 60d] [--strategy orb|vwap|momentum|gapfade|pullback|gapopen] [--slippage n] [--entry market|limit] [--limit-wait n] [--allow-short] [--synthetic]");
+  console.error("usage: npm run backtest -- <symbol> [--interval 5m] [--range 60d] [--strategy orb|vwap|momentum|gapfade|pullback|gapopen|overnight|gapopen_overnight] [--slippage n] [--entry market|limit] [--limit-wait n] [--allow-short] [--synthetic]");
   process.exit(1);
 }
 
@@ -39,9 +39,12 @@ if (args.includes("--standard-tick")) overrides.fineTickSymbols = [];
 if (flag("gap-stop")) overrides.gapStopPct = Number(flag("gap-stop"));
 if (flag("shares")) overrides.shares = Number(flag("shares"));
 if (flag("max-position")) overrides.maxPositionYen = Number(flag("max-position"));
+if (flag("overnight-min")) overrides.overnightMinPct = Number(flag("overnight-min"));
+if (flag("overnight-max-position")) overrides.overnightMaxPositionYen = Number(flag("overnight-max-position"));
 const yen = (n: number) => `${n >= 0 ? "+" : ""}${Math.round(n)}円`;
 
-if (flag("strategy") === "gapopen") {
+const DAILY = { gapopen: "安寄り買い", overnight: "上げた日の持ち越し", gapopen_overnight: "安寄り買い＋持ち越し" } as const;
+if ((flag("strategy") ?? "") in DAILY) {
   // 安寄り買いは日足で検証する。銘柄はカンマ区切りで複数、または core（既定の50銘柄）・wide（それ以外の約200銘柄）・all（両方）を指定できる
   const list = (["core", "wide", "all"].includes(symbolArg) ? universe(symbolArg) : symbolArg.split(",")).map((x: string) => normalizeSymbol(x.trim()));
   if (!args.includes("--standard-tick")) overrides.fineTickSymbols = list;
@@ -50,9 +53,22 @@ if (flag("strategy") === "gapopen") {
   const data = await loadDaily(list, range, flag("cache"));
   const result = runGapOpenBacktest(data, s);
   const m = result.summary;
-  console.log(`${result.symbol}  安寄り買い（${s.gapMinPct}%以上安く寄ったら寄りで買い、${s.gapStopPct}%で損切り、引けで売り）  日足 × ${range}  ${s.shares}株  損失上限 ${s.dailyLossLimitYen}円${s.maxPositionYen > 0 ? `  買付上限 ${s.maxPositionYen}円` : ""}`);
+  const rules = [
+    ...(s.strategy !== "overnight" ? [`${s.gapMinPct}%以上安く寄ったら寄りで買い、${s.gapStopPct}%で損切り、引けで売り`] : []),
+    ...(s.strategy !== "gapopen" ? [`場中に${s.overnightMinPct}%以上上げたら引けで買い、翌朝の寄りで売り`] : []),
+  ];
+  console.log(`${result.symbol}  ${DAILY[s.strategy as keyof typeof DAILY]}（${rules.join("／")}）  日足 × ${range}  ${s.shares}株  損失上限 ${s.dailyLossLimitYen}円${s.maxPositionYen > 0 ? `  買付上限 ${s.maxPositionYen}円` : ""}${s.overnightMaxPositionYen > 0 ? `  持ち越しの買付上限 ${s.overnightMaxPositionYen}円` : ""}`);
   console.log(`日数 ${m.days}  合計 ${yen(m.totalPnl)}  1日平均 ${yen(m.avgPnlPerDay)}  勝ち ${m.winDays}日  負け ${m.loseDays}日  取引なし・±0 ${m.flatDays}日`);
   console.log(`取引 ${m.trades}回  勝率 ${m.winRate == null ? "-" : `${(m.winRate * 100).toFixed(1)}%`}  PF ${m.profitFactor == null ? "-" : m.profitFactor.toFixed(2)}  最大DD ${yen(-m.maxDrawdown)}  最悪日 ${yen(m.worstDay)}  最良日 ${yen(m.bestDay)}`);
+  if (s.strategy === "gapopen_overnight") {
+    const part = (label: string, list: typeof result.trades) => {
+      const win = list.filter((x) => x.pnl > 0);
+      const loss = list.filter((x) => x.pnl < 0).reduce((a, x) => a - x.pnl, 0);
+      console.log(`  ${label}  ${list.length}回  合計 ${yen(list.reduce((a, x) => a + x.pnl, 0))}  勝率 ${((win.length / Math.max(list.length, 1)) * 100).toFixed(1)}%  PF ${loss > 0 ? (win.reduce((a, x) => a + x.pnl, 0) / loss).toFixed(2) : "-"}`);
+    };
+    part("安寄り買い", result.trades.filter((x) => x.reason !== "next_open"));
+    part("持ち越し　", result.trades.filter((x) => x.reason === "next_open"));
+  }
   const plus = result.monthly.filter((x) => x.pnl > 0).length;
   const worstMonth = Math.min(...result.monthly.map((x) => x.pnl));
   console.log(`月 ${result.monthly.length}  プラスの月 ${plus}（${((plus / Math.max(result.monthly.length, 1)) * 100).toFixed(1)}%）  月平均 ${yen(m.totalPnl / Math.max(result.monthly.length, 1))}  最悪の月 ${yen(worstMonth)}`);

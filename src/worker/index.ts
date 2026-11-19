@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { monthly, runBacktest } from "../core/backtest";
-import { runGapOpenBacktest } from "../core/gapopen";
+import { isDailyStrategy, runGapOpenBacktest } from "../core/gapopen";
 import { jstDate } from "../core/market";
 import { normalizeSymbol, parseSettings } from "../core/types";
 import { INTERVAL_SECONDS, RANGES, getProvider } from "../data/provider";
@@ -147,8 +147,8 @@ app.post("/api/backtest", async (c) => {
     return c.json({ error: (e as Error).message }, 400);
   }
   const source = body.source === "synthetic" ? "synthetic" : c.env.DATA_SOURCE;
-  if (settings.strategy === "gapopen") {
-    // 安寄り買いは寄り付きと大引けの値を使うので、分足ではなく日足で検証する
+  if (isDailyStrategy(settings)) {
+    // 安寄り買いと持ち越しは寄り付きと大引けの値を使うので、分足ではなく日足で検証する
     try {
       const today = jstDate(Date.now() / 1000);
       const daily = (await getProvider(source).daily(symbol, "1y", Math.floor(Date.now() / 1000))).filter((b) => b.date < today);
