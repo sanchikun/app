@@ -133,7 +133,7 @@ describe("日足のルール検証", async () => {
   });
 
   it("権利落ち日は配当の分だけ前日の値を下げて比べる", () => {
-    expect(run("fade-low", { o: 1985, h: 1986, l: 1975, c: 1980, dividend: 20 })[0].ret).toBeCloseTo(10 / 1970);
+    expect(run("fade-low", { o: 1985, h: 1986, l: 1965, c: 1980, dividend: 20 })[0].ret).toBeCloseTo(10 / 1970);
     expect(run("gap-down", { o: 1975, h: 1980, l: 1970, c: 1978, dividend: 20 })).toHaveLength(0);
   });
 });
