@@ -55,6 +55,7 @@ npm run deploy
 npm run backtest -- 7203                                  # 5分足 × 60日、寄り付きレンジ突破
 npm run backtest -- 7203 --strategy vwap --slippage 0
 npm run backtest -- 7203 --interval 1m --range 7d
+npm run backtest -- 7203 --strategy gapfade --loss-limit 3000   # 戦略は orb / vwap / momentum / gapfade / pullback
 npm run backtest -- 7203 --entry limit --limit-wait 3     # 新規を指値にする
 npm run backtest -- 7203 --synthetic                      # 合成データ（動作確認用）
 ```
@@ -98,7 +99,7 @@ npm run screen -- --cache .cache --csv out.csv    # 取得した足を保存し�
 | --- | --- | --- |
 | `symbols` | `["7203.T"]` | 対象銘柄（最大5つ） |
 | `fineTickSymbols` | `["7203.T"]` | 細かい呼値で取引される銘柄（TOPIX500 構成銘柄）。ここにない銘柄は通常の呼値で計算する |
-| `strategy` | `orb` | `orb`（寄り付きレンジ突破）または `vwap`（VWAP逆張り） |
+| `strategy` | `orb` | `orb`（寄り付きレンジ突破）、`vwap`（VWAP逆張り）、`momentum`（後場順張り）、`gapfade`（ギャップ埋め）、`pullback`（VWAP押し目買い） |
 | `shares` | 100 | 1回の株数 |
 | `dailyTargetYen` | 0 | 確定益がこの額に届いたらその日は終了。0 なら利益の上限なし |
 | `dailyLossLimitYen` | 1000 | 確定損がこの額に届いたらその日は終了。損切り幅もこの枠に収まるよう狭める |
@@ -111,6 +112,8 @@ npm run screen -- --cache .cache --csv out.csv    # 取得した足を保存し�
 | `forceCloseAt` | 15:20 | これ以降の足の始値で強制決済する |
 | `orbMinutes`、`orbRewardRisk` | 15、1 | レンジの長さ（分）、損切り幅に対する利確幅の倍率 |
 | `vwapK`、`vwapMinBars` | 2、12 | 逆張りする乖離（標準偏差の倍数）、判定に必要な足数 |
+| `momMinPct` | 0.5 | 後場順張りで入るのに必要な前場の騰落率（%） |
+| `gapMinPct` | 1 | ギャップ埋めで入るのに必要な前日終値からのギャップ（%） |
 
 ## 約定の考え方
 

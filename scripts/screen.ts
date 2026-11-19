@@ -42,6 +42,11 @@ const overrides: Record<string, unknown> = { fineTickSymbols: args.includes("--s
 if (flag("strategy")) overrides.strategy = flag("strategy");
 if (flag("slippage")) overrides.slippageTicks = Number(flag("slippage"));
 if (flag("loss-limit")) overrides.dailyLossLimitYen = Number(flag("loss-limit"));
+if (flag("orb-rr")) overrides.orbRewardRisk = Number(flag("orb-rr"));
+if (flag("mom-min")) overrides.momMinPct = Number(flag("mom-min"));
+if (flag("gap-min")) overrides.gapMinPct = Number(flag("gap-min"));
+if (flag("no-entry-after")) overrides.noEntryAfter = flag("no-entry-after");
+if (flag("max-trades")) overrides.maxTradesPerDay = Number(flag("max-trades"));
 if (flag("entry")) overrides.entryOrder = flag("entry");
 if (flag("limit-wait")) overrides.limitWaitBars = Number(flag("limit-wait"));
 if (args.includes("--allow-short")) overrides.allowShort = true;
@@ -102,9 +107,14 @@ for (const symbol of symbols) {
   }
 
   const result = runBacktest(symbol, kept, settings);
-  const pnlsByDate = new Map<string, number[]>();
-  for (const t of result.trades) pnlsByDate.set(t.date, [...(pnlsByDate.get(t.date) ?? []), t.pnl]);
-  const mine: Observation[] = dayFeatures(kept, settings, fine).map((f) => ({ symbol, date: f.date, features: f, tradePnls: pnlsByDate.get(f.date) ?? [] }));
+  const byDate = new Map<string, { pnls: number[]; rets: number[] }>();
+  for (const t of result.trades) {
+    const d = byDate.get(t.date) ?? { pnls: [], rets: [] };
+    d.pnls.push(t.pnl);
+    d.rets.push(t.pnl / (t.entryPrice * t.shares));
+    byDate.set(t.date, d);
+  }
+  const mine: Observation[] = dayFeatures(kept, settings, fine).map((f) => ({ symbol, date: f.date, features: f, tradePnls: byDate.get(f.date)?.pnls ?? [], tradeRets: byDate.get(f.date)?.rets ?? [] }));
   observations.push(...mine);
   lastPrice.set(symbol, kept[kept.length - 1].c);
 }
@@ -117,7 +127,7 @@ for (const f of failed) console.log(`対象外 ${f}`);
 if (offTick.length) console.log(`注意: 株価が呼値の刻みに合わない日を除きました（${offTick.join("、")}）。株式分割の前か、TOPIX500 構成銘柄でない可能性があります。`);
 if (observations.length === 0) process.exit(1);
 
-const line = (b: BucketStats) => `${b.label}  銘柄×日 ${b.days}  取引 ${b.trades}回  合計 ${yen(b.pnl)}  勝率 ${pct(b.winRate)}  PF ${pf(b.profitFactor)}`;
+const line = (b: BucketStats) => `${b.label}  銘柄×日 ${b.days}  取引 ${b.trades}回  合計 ${yen(b.pnl)}  勝率 ${pct(b.winRate)}  PF ${pf(b.profitFactor)}  平均 ${b.avgRetBp == null ? "-" : `${b.avgRetBp >= 0 ? "+" : ""}${b.avgRetBp.toFixed(1)}bp`}/取引`;
 console.log(`\n${line(stats("全体", observations))}`);
 if (maxStopFit != null) {
   const out = observations.filter((o) => o.features.stopFit > maxStopFit);
@@ -132,6 +142,8 @@ const dates = [...new Set(observations.map((o) => o.date))].sort();
 const split = dates[Math.floor(dates.length / 2)];
 const first = observations.filter((o) => o.date < split);
 const second = observations.filter((o) => o.date >= split);
+console.log(line(stats(`前半（${dates[0]}〜）`, first)));
+console.log(line(stats(`後半（${split}〜）`, second)));
 console.log(`\n■ 指標ごとの成績（境界は前半のデータで3等分して決め、後半にもそのまま当てはめる）`);
 console.log(`  前半 ${dates[0]}〜  後半 ${split}〜${dates[dates.length - 1]}`);
 const w = [4, 16, 6, 6, 10, 7, 5];

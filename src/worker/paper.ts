@@ -67,14 +67,17 @@ export async function paperTick(db: D1Database, provider: DataProvider, now: num
       .prepare("SELECT state_json FROM days WHERE date < ? ORDER BY date DESC LIMIT 1")
       .bind(date)
       .first<{ state_json: string }>();
+    state = newDay(date);
     if (prev) {
       const prevState = JSON.parse(prev.state_json) as DayState;
       if (prevState.position || prevState.pending) {
         const closed = finishDay(prevState, settings);
         statements.push(...saveStatements(db, prevState, closed));
       }
+      // ギャップを見る戦略のために、前営業日の最後の足の終値を引き継ぐ
+      const closes = Object.entries(prevState.bars ?? {}).flatMap(([sym, bars]) => (bars.length ? [[sym, bars[bars.length - 1].c] as const] : []));
+      if (closes.length) state.prevClose = Object.fromEntries(closes);
     }
-    state = newDay(date);
   }
 
   // 大引けから30分以上たてば、遅延データでも最後の足まで確定している

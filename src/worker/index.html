@@ -65,7 +65,7 @@
     <h2>バックテスト</h2>
     <form id="bt" class="row">
       <label>銘柄コード<input name="symbol" value="7203" required></label>
-      <label>戦略<select name="strategy"><option value="orb">寄り付きレンジ突破</option><option value="vwap">VWAP逆張り</option></select></label>
+      <label>戦略<select name="strategy"><option value="orb">寄り付きレンジ突破</option><option value="vwap">VWAP逆張り</option><option value="momentum">後場順張り</option><option value="gapfade">ギャップ埋め</option><option value="pullback">VWAP押し目買い</option></select></label>
       <label>足<select name="interval"><option value="5m">5分足 × 60日</option><option value="1m">1分足 × 7日</option></select></label>
       <label>滑り（ティック）<input name="slippage" type="number" min="0" max="20" value="1"></label>
       <label>データ<select name="source"><option value="">実データ</option><option value="synthetic">合成（動作確認用）</option></select></label>

@@ -65,8 +65,11 @@ export function runBacktest(symbol: string, bars: Bar[], settings: Settings): Ba
   const daily: DayResult[] = [];
   const trades: Trade[] = [];
   const fine = settings.fineTickSymbols.includes(symbol);
+  let prevClose: number | null = null;
   for (const [date, dayBars] of groupByDate(bars)) {
     const state = newDay(date);
+    if (prevClose != null) state.prevClose = { [symbol]: prevClose };
+    prevClose = dayBars[dayBars.length - 1].c;
     for (const bar of dayBars) trades.push(...processBar(state, settings, symbol, bar));
     trades.push(...finishDay(state, settings));
     daily.push({ date, pnl: state.realizedPnl, trades: state.tradeCount, halted: state.halted });

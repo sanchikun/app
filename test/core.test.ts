@@ -280,3 +280,25 @@ describe("指値での新規", () => {
     expect(sl.trades).toMatchObject([{ entryPrice: 1012, exitPrice: 1007, reason: "stop_loss", pnl: -500 }]);
   });
 });
+
+describe("追加の戦略", () => {
+  it("後場順張り: 前場が上げた日に後場の最初の足で買いシグナルを出す", async () => {
+    const { momentum } = await import("../src/core/strategy");
+    const morning = [bar(0, 1000, 1004, 1000, 1004), bar(1, 1004, 1010, 1004, 1010)];
+    const afternoon = bar(42, 1010, 1012, 1009, 1011); // 12:30
+    expect(momentum([...morning, afternoon], S, false)).toMatchObject({ side: "long", stop: 1006 });
+    expect(momentum(morning, S, false)).toBeNull();
+    expect(momentum([...morning, afternoon, bar(43, 1011, 1013, 1010, 1012)], S, false)).toBeNull();
+    expect(momentum([...morning, bar(42, 1010, 1010, 1005, 1006)], S, false)).toBeNull();
+  });
+
+  it("ギャップ埋め: 前日終値より1%以上安く寄った日に、前日終値を利確にして買う", () => {
+    const s: Settings = { ...S, strategy: "gapfade", dailyTargetYen: 0, dailyLossLimitYen: 100000 };
+    const prevDay = { t: OPEN - 86400 + 6 * 3600, o: 1000, h: 1000, l: 1000, c: 1000, v: 1000 };
+    const bars = [prevDay, bar(0, 985, 986, 984, 985), bar(1, 986, 990, 985, 989), bar(2, 989, 1001, 988, 1000)];
+    const r = runBacktest(SYM, bars, s);
+    expect(r.trades).toMatchObject([{ side: "long", entryPrice: 986, exitPrice: 1000, reason: "take_profit" }]);
+    // 前日の足がなければ入らない
+    expect(runBacktest(SYM, bars.slice(1), s).trades).toHaveLength(0);
+  });
+});

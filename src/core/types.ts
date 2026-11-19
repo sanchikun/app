@@ -9,7 +9,8 @@ export interface Bar {
 }
 
 export type Side = "long" | "short";
-export type StrategyName = "orb" | "vwap";
+export const STRATEGY_NAMES = ["orb", "vwap", "momentum", "gapfade", "pullback"] as const;
+export type StrategyName = (typeof STRATEGY_NAMES)[number];
 export type EntryOrder = "market" | "limit";
 export type HaltReason = "target" | "loss_limit" | "max_trades";
 export type ExitReason = "take_profit" | "stop_loss" | "force_close" | "eod";
@@ -47,6 +48,10 @@ export interface Settings {
   vwapK: number;
   /** VWAP: 判定に必要な最小の足数 */
   vwapMinBars: number;
+  /** 後場順張り: 前場の騰落率（%）がこれ以上のときだけ入る */
+  momMinPct: number;
+  /** ギャップ埋め: 前日終値からのギャップ（%）がこれ以上のときだけ入る */
+  gapMinPct: number;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -69,6 +74,8 @@ export const DEFAULT_SETTINGS: Settings = {
   orbRewardRisk: 1,
   vwapK: 2,
   vwapMinBars: 12,
+  momMinPct: 0.5,
+  gapMinPct: 1,
 };
 
 export interface Signal {
@@ -109,6 +116,8 @@ export interface DayState {
   /** 次の足の始値で約定させる注文 */
   pending: (Signal & { symbol: string; limit?: { price: number; barsLeft: number } }) | null;
   bars: Record<string, Bar[]>;
+  /** 銘柄ごとの前営業日の終値（ギャップを見る戦略が使う） */
+  prevClose?: Record<string, number>;
 }
 
 function isHHMM(v: unknown): v is string {
@@ -152,11 +161,13 @@ export function parseSettings(input: unknown, base: Settings = DEFAULT_SETTINGS)
   num("orbRewardRisk", 0.1, 10);
   num("vwapK", 0.5, 5);
   num("vwapMinBars", 5, 200, true);
+  num("momMinPct", 0, 20);
+  num("gapMinPct", 0.1, 20);
   time("noEntryAfter");
   time("forceCloseAt");
   if ("strategy" in src) {
-    if (src.strategy !== "orb" && src.strategy !== "vwap") throw new Error('strategy must be "orb" or "vwap"');
-    out.strategy = src.strategy;
+    if (!STRATEGY_NAMES.includes(src.strategy as StrategyName)) throw new Error(`strategy must be one of ${STRATEGY_NAMES.join(", ")}`);
+    out.strategy = src.strategy as StrategyName;
   }
   if ("entryOrder" in src) {
     if (src.entryOrder !== "market" && src.entryOrder !== "limit") throw new Error('entryOrder must be "market" or "limit"');

@@ -16,7 +16,7 @@ const flag = (name: string) => {
 };
 const symbolArg = args[0];
 if (!symbolArg || symbolArg.startsWith("--")) {
-  console.error("usage: npm run backtest -- <symbol> [--interval 5m] [--range 60d] [--strategy orb|vwap] [--slippage n] [--entry market|limit] [--limit-wait n] [--allow-short] [--synthetic]");
+  console.error("usage: npm run backtest -- <symbol> [--interval 5m] [--range 60d] [--strategy orb|vwap|momentum|gapfade|pullback] [--slippage n] [--entry market|limit] [--limit-wait n] [--allow-short] [--synthetic]");
   process.exit(1);
 }
 
@@ -25,6 +25,9 @@ if (flag("strategy")) overrides.strategy = flag("strategy");
 if (flag("slippage")) overrides.slippageTicks = Number(flag("slippage"));
 if (flag("target")) overrides.dailyTargetYen = Number(flag("target"));
 if (flag("loss-limit")) overrides.dailyLossLimitYen = Number(flag("loss-limit"));
+if (flag("orb-rr")) overrides.orbRewardRisk = Number(flag("orb-rr"));
+if (flag("mom-min")) overrides.momMinPct = Number(flag("mom-min"));
+if (flag("gap-min")) overrides.gapMinPct = Number(flag("gap-min"));
 if (flag("entry")) overrides.entryOrder = flag("entry");
 if (flag("limit-wait")) overrides.limitWaitBars = Number(flag("limit-wait"));
 if (args.includes("--allow-short")) overrides.allowShort = true;

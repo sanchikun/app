@@ -42,7 +42,7 @@ describe("dayFeatures", () => {
 });
 
 describe("集計", () => {
-  const obs = (v: number, tradePnls: number[]): Observation => ({ symbol: "X", date: "2026-11-02", features: { gapPct: v } as DayFeatures, tradePnls });
+  const obs = (v: number, tradePnls: number[]): Observation => ({ symbol: "X", date: "2026-11-02", features: { gapPct: v } as DayFeatures, tradePnls, tradeRets: tradePnls.map((p) => p / 100000) });
 
   it("3等分の境界で 低・中・高 に分ける", () => {
     expect(tercileCuts([5, 1, 3, 2, 6, 4])).toEqual([3, 5]);

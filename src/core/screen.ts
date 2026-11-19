@@ -92,6 +92,8 @@ export interface Observation {
   date: string;
   features: DayFeatures;
   tradePnls: number[];
+  /** 取引ごとの損益率（損益 ÷ 建玉の金額）。株価の違う銘柄をまとめて見るために使う */
+  tradeRets: number[];
 }
 
 export interface BucketStats {
@@ -103,10 +105,13 @@ export interface BucketStats {
   pnlPerDay: number;
   winRate: number | null;
   profitFactor: number | null;
+  /** 1取引あたりの平均損益率（bp = 0.01%） */
+  avgRetBp: number | null;
 }
 
 export function stats(label: string, obs: Observation[]): BucketStats {
   const pnls = obs.flatMap((o) => o.tradePnls);
+  const rets = obs.flatMap((o) => o.tradeRets);
   const pnl = pnls.reduce((a, p) => a + p, 0);
   const win = pnls.filter((p) => p > 0).reduce((a, p) => a + p, 0);
   const loss = pnls.filter((p) => p < 0).reduce((a, p) => a - p, 0);
@@ -118,6 +123,7 @@ export function stats(label: string, obs: Observation[]): BucketStats {
     pnlPerDay: obs.length ? pnl / obs.length : 0,
     winRate: pnls.length ? pnls.filter((p) => p > 0).length / pnls.length : null,
     profitFactor: loss > 0 ? win / loss : null,
+    avgRetBp: rets.length ? (rets.reduce((a, r) => a + r, 0) / rets.length) * 1e4 : null,
   };
 }
 

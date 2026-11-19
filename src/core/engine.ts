@@ -127,7 +127,7 @@ export function processBar(state: DayState, s: Settings, symbol: string, bar: Ba
 
   // 3. 新しいシグナル（同時に持つのは1ポジションまで）
   if (!state.position && !state.pending && !state.halted && !exited && canEnter) {
-    const signal = STRATEGIES[s.strategy](bars, s, fine);
+    const signal = STRATEGIES[s.strategy](bars, s, fine, { prevClose: state.prevClose?.[symbol] });
     if (signal) {
       state.pending = s.entryOrder === "limit" ? { ...signal, symbol, limit: { price: bar.c, barsLeft: s.limitWaitBars } } : { ...signal, symbol };
     }
