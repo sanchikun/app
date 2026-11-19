@@ -184,6 +184,7 @@ $("bt").addEventListener("submit", async (ev) => {
       ${stat("最大ドローダウン", yen(-s.maxDrawdown), s.maxDrawdown ? "down" : "")}
     </div>
     <p class="muted">${r.symbol}・${r.source === "synthetic" ? "合成データ（数字に意味はありません）" : "Yahoo Finance"}・過去の成績は将来の利益を保証しません</p>
+    ${r.tickMismatch ? `<p class="down">注意: 株価が${r.fineTick ? "細かい" : "通常の"}呼値の刻みに合っていません。設定の fineTickSymbols（細かい呼値の銘柄）を確認してください。滑りと損切り幅の計算がずれます。</p>` : ""}
     <div class="scroll"><table id="btMonthly"></table></div>
     <div class="scroll"><table id="btDaily"></table></div>`;
     table($("btMonthly"), ["月", "損益", "日数", "取引"], [...r.monthly].reverse().map((x) => [x.month, [yen(x.pnl), cls(x.pnl)], `${x.days}日`, `${x.trades}回`]), "データがありません");

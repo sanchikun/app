@@ -3,12 +3,12 @@ import type { Bar, Settings, Signal } from "./types";
 
 /**
  * その日のここまでの足（最後が確定したばかりの足）からシグナルを返す。
- * 約定は次の足の始値なので、ここでは未来の値を見ない。
+ * 約定は次の足の始値なので、ここでは未来の値を見ない。fine は細かい呼値の銘柄かどうか。
  */
-export type Strategy = (bars: Bar[], settings: Settings) => Signal | null;
+export type Strategy = (bars: Bar[], settings: Settings, fine?: boolean) => Signal | null;
 
 /** 寄り付きレンジのブレイクアウト。終値がレンジを抜けた足でだけ発火する。 */
-export const orb: Strategy = (bars, s) => {
+export const orb: Strategy = (bars, s, fine = false) => {
   if (bars.length < 2) return null;
   const rangeEnd = SESSION_OPEN + s.orbMinutes;
   const last = bars[bars.length - 1];
@@ -18,27 +18,27 @@ export const orb: Strategy = (bars, s) => {
   if (range.length === 0) return null;
   const hi = Math.max(...range.map((b) => b.h));
   const lo = Math.min(...range.map((b) => b.l));
-  const risk = Math.max((hi - lo) / 2, 2 * tickSize(last.c));
+  const risk = Math.max((hi - lo) / 2, 2 * tickSize(last.c, fine));
 
   if (prev.c <= hi && last.c > hi) {
     return {
       side: "long",
-      stop: roundToTick(last.c - risk, "down"),
-      target: roundToTick(last.c + risk * s.orbRewardRisk, "up"),
+      stop: roundToTick(last.c - risk, "down", fine),
+      target: roundToTick(last.c + risk * s.orbRewardRisk, "up", fine),
     };
   }
   if (s.allowShort && prev.c >= lo && last.c < lo) {
     return {
       side: "short",
-      stop: roundToTick(last.c + risk, "up"),
-      target: roundToTick(last.c - risk * s.orbRewardRisk, "down"),
+      stop: roundToTick(last.c + risk, "up", fine),
+      target: roundToTick(last.c - risk * s.orbRewardRisk, "down", fine),
     };
   }
   return null;
 };
 
 /** VWAPからの乖離が k×標準偏差 を超えた足で逆張りし、VWAPへの回帰を狙う。 */
-export const vwap: Strategy = (bars, s) => {
+export const vwap: Strategy = (bars, s, fine = false) => {
   if (bars.length < Math.max(s.vwapMinBars, 2)) return null;
   let pv = 0;
   let vol = 0;
@@ -59,20 +59,20 @@ export const vwap: Strategy = (bars, s) => {
   const dev = devs[devs.length - 1];
   const prevDev = devs[devs.length - 2];
   const band = s.vwapK * sd;
-  const minMove = 2 * tickSize(last.c);
+  const minMove = 2 * tickSize(last.c, fine);
 
   if (dev < -band && prevDev >= -band && current - last.c >= minMove) {
     return {
       side: "long",
-      stop: roundToTick(last.c - (current - last.c), "down"),
-      target: roundToTick(current, "down"),
+      stop: roundToTick(last.c - (current - last.c), "down", fine),
+      target: roundToTick(current, "down", fine),
     };
   }
   if (s.allowShort && dev > band && prevDev <= band && last.c - current >= minMove) {
     return {
       side: "short",
-      stop: roundToTick(last.c + (last.c - current), "up"),
-      target: roundToTick(current, "up"),
+      stop: roundToTick(last.c + (last.c - current), "up", fine),
+      target: roundToTick(current, "up", fine),
     };
   }
   return null;

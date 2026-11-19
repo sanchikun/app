@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { runBacktest } from "../src/core/backtest";
 import { finishDay, newDay, processBar } from "../src/core/engine";
-import { inSession, jstDate, jstMinutes, roundToTick, tickSize } from "../src/core/market";
+import { inSession, jstDate, jstMinutes, roundToTick, tickMismatchRate, tickSize } from "../src/core/market";
 import { orb, vwap } from "../src/core/strategy";
 import { DEFAULT_SETTINGS, normalizeSymbol, parseSettings } from "../src/core/types";
 import type { Bar, Settings } from "../src/core/types";
@@ -9,7 +9,7 @@ import { parseYahooChart, synthetic } from "../src/data/provider";
 
 // 2026-11-18 09:00 JST
 const OPEN = Date.UTC(2026, 10, 18, 0, 0, 0) / 1000;
-const S: Settings = { ...DEFAULT_SETTINGS, slippageTicks: 0, orbMinutes: 15, dailyTargetYen: 100, dailyLossLimitYen: 600 };
+const S: Settings = { ...DEFAULT_SETTINGS, fineTickSymbols: [], slippageTicks: 0, orbMinutes: 15, dailyTargetYen: 100, dailyLossLimitYen: 600 };
 const SYM = "7203.T";
 
 /** 5分足を n 本目の位置に作る */
@@ -51,6 +51,18 @@ describe("market", () => {
     expect(roundToTick(4003, "down")).toBe(4000);
     expect(roundToTick(4003, "up")).toBe(4005);
     expect(roundToTick(1234.4)).toBe(1234);
+  });
+  it("uses the finer TOPIX500 ticks when asked", () => {
+    expect(tickSize(999, true)).toBe(0.1);
+    expect(tickSize(2500, true)).toBe(0.5);
+    expect(tickSize(3405, true)).toBe(1);
+    expect(tickSize(12000, true)).toBe(5);
+    expect(roundToTick(999.57, "down", true)).toBe(999.5);
+    expect(roundToTick(2500.3, "up", true)).toBe(2500.5);
+    expect(roundToTick(3403, "down", true)).toBe(3403);
+    const bars = [3402, 3403, 3405, 3407].map((c, i) => bar(i, c, c, c, c));
+    expect(tickMismatchRate(bars, false)).toBe(0.75);
+    expect(tickMismatchRate(bars, true)).toBe(0);
   });
 });
 
@@ -108,6 +120,15 @@ describe("engine", () => {
     expect(win).toMatchObject({ entryPrice: 1014, exitPrice: 1017, pnl: 300 });
     const loss = run([...breakout, bar(4, 1013, 1014, 1006, 1008)], s).trades[0];
     expect(loss).toMatchObject({ entryPrice: 1014, exitPrice: 1006, pnl: -800 });
+  });
+  it("sizes slippage and the stop with the symbol's own tick", () => {
+    const up = breakout.map((b) => ({ ...b, o: b.o + 2400, h: b.h + 2400, l: b.l + 2400, c: b.c + 2400 }));
+    const next = bar(4, 3413, 3415, 3411, 3414);
+    const s = { ...S, slippageTicks: 1, dailyLossLimitYen: 1000 };
+    // 通常の呼値: 5円刻み → 約定 3418、損切りは 3413 にしか置けず、同じ足で損切りにかかる
+    expect(run([...up, next], s).trades[0]).toMatchObject({ entryPrice: 3418, exitPrice: 3408, pnl: -1000, reason: "stop_loss" });
+    // 細かい呼値: 1円刻み → 約定 3414、戦略の損切り 3407 がそのまま使える
+    expect(run([...up, next], { ...s, fineTickSymbols: [SYM] }).state.position).toMatchObject({ entryPrice: 3414, stop: 3407 });
   });
   it("charges commission on both sides", () => {
     const { trades } = run([...breakout, bar(4, 1013, 1018, 1012, 1016)], { ...S, commissionPerOrderYen: 50, dailyLossLimitYen: 1000 });
@@ -198,6 +219,7 @@ describe("inputs", () => {
     expect(parseSettings({ shares: 200 }).shares).toBe(200);
     expect(parseSettings({ symbols: ["7203", "6758.t"] }).symbols).toEqual(["7203.T", "6758.T"]);
     expect(parseSettings({ dailyTargetYen: 0 }).dailyTargetYen).toBe(0);
+    expect(parseSettings({ fineTickSymbols: ["6758"] }).fineTickSymbols).toEqual(["6758.T"]);
     expect(() => parseSettings({ shares: 0 })).toThrow();
     expect(() => parseSettings({ strategy: "x" })).toThrow();
     expect(() => parseSettings({ forceCloseAt: "25:00" })).toThrow();

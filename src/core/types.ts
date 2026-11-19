@@ -17,6 +17,8 @@ export interface Settings {
   /** ペーパートレードの稼働フラグ */
   enabled: boolean;
   symbols: string[];
+  /** TOPIX500 構成銘柄など、細かい呼値（3,000円以下で0.5円刻みなど）で取引される銘柄 */
+  fineTickSymbols: string[];
   strategy: StrategyName;
   shares: number;
   /** この金額以上の確定益でその日の新規発注を止める。0 なら利益の上限なし */
@@ -45,6 +47,7 @@ export interface Settings {
 export const DEFAULT_SETTINGS: Settings = {
   enabled: false,
   symbols: ["7203.T"],
+  fineTickSymbols: ["7203.T"],
   strategy: "orb",
   shares: 100,
   dailyTargetYen: 0,
@@ -153,6 +156,13 @@ export function parseSettings(input: unknown, base: Settings = DEFAULT_SETTINGS)
       throw new Error("symbols must be an array of 1-5 strings");
     }
     out.symbols = (v as string[]).map(normalizeSymbol);
+  }
+  if ("fineTickSymbols" in src) {
+    const v = src.fineTickSymbols;
+    if (!Array.isArray(v) || v.length > 500 || !v.every((s) => typeof s === "string")) {
+      throw new Error("fineTickSymbols must be an array of strings");
+    }
+    out.fineTickSymbols = (v as string[]).map(normalizeSymbol);
   }
   return out;
 }

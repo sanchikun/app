@@ -1,5 +1,5 @@
 import { finishDay, newDay, processBar } from "./engine";
-import { groupByDate } from "./market";
+import { groupByDate, tickMismatchRate } from "./market";
 import type { Bar, HaltReason, Settings, Trade } from "./types";
 
 export interface DayResult {
@@ -52,6 +52,10 @@ export interface BacktestResult {
     worstDay: number;
     bestDay: number;
   };
+  /** 細かい呼値の銘柄として計算したか */
+  fineTick: boolean;
+  /** 足の値が呼値の刻みに合わない割合が高い（fineTickSymbols の設定が銘柄と合っていない疑い） */
+  tickMismatch: boolean;
   monthly: MonthResult[];
   daily: DayResult[];
   trades: Trade[];
@@ -60,6 +64,7 @@ export interface BacktestResult {
 export function runBacktest(symbol: string, bars: Bar[], settings: Settings): BacktestResult {
   const daily: DayResult[] = [];
   const trades: Trade[] = [];
+  const fine = settings.fineTickSymbols.includes(symbol);
   for (const [date, dayBars] of groupByDate(bars)) {
     const state = newDay(date);
     for (const bar of dayBars) trades.push(...processBar(state, settings, symbol, bar));
@@ -98,6 +103,8 @@ export function runBacktest(symbol: string, bars: Bar[], settings: Settings): Ba
       worstDay: pnls.length ? Math.min(...pnls) : 0,
       bestDay: pnls.length ? Math.max(...pnls) : 0,
     },
+    fineTick: fine,
+    tickMismatch: tickMismatchRate(bars, fine) > 0.2,
     monthly: monthly(daily),
     daily,
     trades,

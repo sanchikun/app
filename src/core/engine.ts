@@ -1,4 +1,4 @@
-import { hhmmToMinutes, jstMinutes, tickSize } from "./market";
+import { cleanPrice, hhmmToMinutes, jstMinutes, tickSize } from "./market";
 import { STRATEGIES } from "./strategy";
 import type { Bar, DayState, ExitReason, Settings, Trade } from "./types";
 
@@ -25,7 +25,8 @@ function closePosition(
 ): Trade {
   const pos = state.position!;
   const dir = pos.side === "long" ? 1 : -1;
-  const pnl = (price - pos.entryPrice) * dir * pos.shares - 2 * s.commissionPerOrderYen;
+  price = cleanPrice(price);
+  const pnl = Math.round(((price - pos.entryPrice) * dir * pos.shares - 2 * s.commissionPerOrderYen) * 100) / 100;
   const trade: Trade = {
     date: state.date,
     symbol: pos.symbol,
@@ -39,7 +40,7 @@ function closePosition(
     reason,
   };
   state.position = null;
-  state.realizedPnl += pnl;
+  state.realizedPnl = Math.round((state.realizedPnl + pnl) * 100) / 100;
   state.tradeCount += 1;
   if (s.dailyTargetYen > 0 && state.realizedPnl >= s.dailyTargetYen) state.halted = "target";
   else if (state.realizedPnl <= -s.dailyLossLimitYen) state.halted = "loss_limit";
@@ -54,7 +55,8 @@ export function processBar(state: DayState, s: Settings, symbol: string, bar: Ba
   bars.push(bar);
   const mins = jstMinutes(bar.t);
   const canEnter = mins < hhmmToMinutes(s.noEntryAfter);
-  const slip = s.slippageTicks * tickSize(bar.o);
+  const fine = s.fineTickSymbols.includes(symbol);
+  const slip = s.slippageTicks * tickSize(bar.o, fine);
 
   // 1. 前の足で出たシグナルをこの足の始値で約定させる
   const pending = state.pending;
@@ -62,12 +64,12 @@ export function processBar(state: DayState, s: Settings, symbol: string, bar: Ba
     state.pending = null;
     if (!state.position && !state.halted && canEnter) {
       const dir = pending.side === "long" ? 1 : -1;
-      const fill = bar.o + dir * slip;
+      const fill = cleanPrice(bar.o + dir * slip);
       // 損切り時の損失がその日の残りの損失枠に収まるよう、損切り幅を狭める
-      const tick = tickSize(bar.o);
+      const tick = tickSize(bar.o, fine);
       const budget = s.dailyLossLimitYen + state.realizedPnl - 2 * s.commissionPerOrderYen;
-      const maxDist = Math.floor((budget / s.shares - slip) / tick + 1e-9) * tick;
-      const stop = dir === 1 ? Math.max(pending.stop, fill - maxDist) : Math.min(pending.stop, fill + maxDist);
+      const maxDist = cleanPrice(Math.floor((budget / s.shares - slip) / tick + 1e-6) * tick);
+      const stop = cleanPrice(dir === 1 ? Math.max(pending.stop, fill - maxDist) : Math.min(pending.stop, fill + maxDist));
       // 枠が1ティック分もない、または寄り値がすでに損切り・利確の外側なら見送る
       const lo = Math.min(stop, pending.target);
       const hi = Math.max(stop, pending.target);
@@ -107,7 +109,7 @@ export function processBar(state: DayState, s: Settings, symbol: string, bar: Ba
 
   // 3. 新しいシグナル（同時に持つのは1ポジションまで）
   if (!state.position && !state.pending && !state.halted && !exited && canEnter) {
-    const signal = STRATEGIES[s.strategy](bars, s);
+    const signal = STRATEGIES[s.strategy](bars, s, fine);
     if (signal) state.pending = { ...signal, symbol };
   }
   return trades;
@@ -121,6 +123,6 @@ export function finishDay(state: DayState, s: Settings): Trade[] {
   const last = state.bars[pos.symbol]?.at(-1);
   if (!last) return [];
   const dir = pos.side === "long" ? 1 : -1;
-  const slip = s.slippageTicks * tickSize(last.c);
+  const slip = s.slippageTicks * tickSize(last.c, s.fineTickSymbols.includes(pos.symbol));
   return [closePosition(state, s, last.t, last.c - dir * slip, "eod")];
 }
