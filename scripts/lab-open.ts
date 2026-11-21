@@ -8,14 +8,17 @@
 import { existsSync, readFileSync } from "node:fs";
 import { jstDate, tickSize } from "../src/core/market";
 import type { Bar } from "../src/core/types";
-import { CACHE, ETFS, build, f, mean, stat } from "./lab";
+import { CACHE, ETFS, build, f, mean, readArchive, stat } from "./lab";
 import type { Rec } from "./lab";
 
 const u = build((s) => !ETFS.includes(s));
+/** ためてある分足（data/intraday）に、取得したばかりの分足（.cachev）を重ねる。同じ日は取得したばかりのほうを使う */
+const archive = { "5m-60d": readArchive("5m"), "1m-7d": readArchive("1m-open") };
 function loadBars(s: string, kind: "5m-60d" | "1m-7d"): Map<string, Bar[]> {
-  const m = new Map<string, Bar[]>();
+  const m = new Map<string, Bar[]>(archive[kind].get(s) ?? []);
+  const fresh = new Set<string>();
   const file = `${CACHE}/${s}-${kind}.json`;
-  if (existsSync(file)) for (const b of JSON.parse(readFileSync(file, "utf8")) as Bar[]) { const d = jstDate(b.t); const a = m.get(d); if (a) a.push(b); else m.set(d, [b]); }
+  if (existsSync(file)) for (const b of JSON.parse(readFileSync(file, "utf8")) as Bar[]) { const d = jstDate(b.t); if (!fresh.has(d)) { fresh.add(d); m.set(d, []); } m.get(d)!.push(b); }
   return m;
 }
 const cache5 = new Map<string, Map<string, Bar[]>>(), cache1 = new Map<string, Map<string, Bar[]>>();

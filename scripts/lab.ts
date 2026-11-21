@@ -6,9 +6,12 @@
  *   npx tsx scripts/lab-round2.ts    # 条件をまとめて試す
  */
 import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { gunzipSync } from "node:zlib";
 import type { DailyBar } from "../src/core/gapstudy";
 
 export const CACHE = ".cachev";
+/** ためてある分足（scripts/intraday-archive.ts が書く。リポジトリに入っている） */
+export const ARCHIVE = "data/intraday";
 export const ETFS = ["1306.T", "1321.T", "1570.T", "1357.T", "1343.T", "2516.T"];
 export interface Rec {
   s: string; d: string; pd: string;
@@ -127,4 +130,28 @@ export function tester(u: ReturnType<typeof build>) {
     const label = typeof kind === "function" ? "cust" : kind;
     console.log(`${name.padEnd(42)} ${label.padEnd(5)} tr${String(nt).padStart(7)} d${String(a.n).padStart(5)} trBp${f((sum / Math.max(nt, 1)) * 1e4)} dayBp${f(a.m)} t${f(a.t, 6, 2)} exc${f(e.m)} t${f(e.t, 6, 2)} |${per}`);
   };
+}
+
+/**
+ * ためてある分足を読む。銘柄 → 日付 → その日の足（時刻順）。kind は "5m"（取引時間中の5分足）か "1m-open"（9:00〜10:00 の1分足）。
+ * since / until（"YYYY-MM-DD"）で日付を絞れる。
+ */
+export function readArchive(kind: "5m" | "1m-open", since = "", until = "9999"): Map<string, Map<string, { t: number; o: number; h: number; l: number; c: number; v: number }[]>> {
+  const out = new Map<string, Map<string, { t: number; o: number; h: number; l: number; c: number; v: number }[]>>();
+  const dir = `${ARCHIVE}/${kind}`;
+  if (!existsSync(dir)) return out;
+  for (const file of readdirSync(dir).filter((x) => x.endsWith(".csv.gz")).sort()) {
+    const d = file.slice(0, 10);
+    if (d < since || d > until) continue;
+    for (const line of gunzipSync(readFileSync(`${dir}/${file}`)).toString("utf8").split("\n")) {
+      if (!line) continue;
+      const [s, t, o, h, l, c, v] = line.split(",");
+      if (!out.has(s)) out.set(s, new Map());
+      const m = out.get(s)!;
+      const bar = { t: Number(t), o: Number(o), h: Number(h), l: Number(l), c: Number(c), v: Number(v) };
+      const a = m.get(d);
+      if (a) a.push(bar); else m.set(d, [bar]);
+    }
+  }
+  return out;
 }
