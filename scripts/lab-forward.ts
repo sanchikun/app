@@ -25,15 +25,16 @@ const gapOpen = (cond: (r: Rec) => boolean) => (d: string): number | null => {
   return r.lowPct <= -0.005 ? -0.0053 : r.intra;
 };
 /** 安寄り買いを n 銘柄に分ける: ギャップの大きい順に、1銘柄 budget 円に収まる株数（100株単位）を買う。損益率は n×budget に対する割合 */
-const gapOpenMulti = (n: number, budget: number) => (d: string): number | null => {
-  const c = stocks.byDay.get(d)!.filter((r) => r.gap <= -0.01).sort((a, b) => a.gap - b.gap);
+const gapOpenMulti = (n: number, budget: number, short = false) => (d: string): number | null => {
+  // short なら高く寄った順に売る（損切りは寄り値の0.5%上）
+  const c = stocks.byDay.get(d)!.filter((r) => (short ? r.gap >= 0.01 : r.gap <= -0.01)).sort((a, b) => (short ? b.gap - a.gap : a.gap - b.gap));
   let pnl = 0, k = 0;
   for (const r of c) {
     if (k >= n) break;
     const open = r.px * (1 + r.gap), shares = Math.floor(budget / (open * 100)) * 100;
     if (shares <= 0) continue;
     k++;
-    pnl += shares * open * (r.lowPct <= -0.005 ? -0.0053 : r.intra);
+    pnl += shares * open * ((short ? r.highPct >= 0.005 : r.lowPct <= -0.005) ? -0.0053 : short ? -r.intra : r.intra);
   }
   return k ? pnl / (n * budget) : null;
 };
@@ -46,6 +47,7 @@ const RULES: [string, number, (d: string) => number | null, string?][] = [
   ["候補3b：米国-2%以下の翌日、1570 を寄りで買い引けで売る", 300000, (d) => { const r = lev.get(d); return r && r.us <= -0.02 ? r.intra : null; }],
   ["候補5（11/21〜）：安寄り買いを2銘柄×25万円に分ける（条件なし）", 500000, gapOpenMulti(2, 250000), FROZEN2],
   ["候補5b（11/21〜）：3銘柄×50万円に分ける（条件なし）", 1500000, gapOpenMulti(3, 500000), FROZEN2],
+  ["候補6（11/21〜）：高く寄った上位2銘柄×25万円を空売りし、引けで買い戻す", 500000, gapOpenMulti(2, 250000, true), FROZEN2],
 ];
 console.log(`${since} より後の ${days.length} 営業日（${days[0] ?? "-"}〜${days[days.length - 1] ?? "-"}）`);
 for (const [name, notional, rule, from] of RULES) {
