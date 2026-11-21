@@ -218,9 +218,9 @@ describe("inputs", () => {
   it("validates settings", () => {
     expect(parseSettings({ shares: 200 }).shares).toBe(200);
     expect(parseSettings({ symbols: ["7203", "6758.t"] }).symbols).toEqual(["7203.T", "6758.T"]);
-    // 日足で動かす戦略は300銘柄まで、分足の戦略は20銘柄まで
-    const many = Array.from({ length: 300 }, (_, i) => String(1000 + i));
-    expect(parseSettings({ symbols: many, strategy: "gapopen" }).symbols).toHaveLength(300);
+    // 日足で動かす戦略は500銘柄まで、分足の戦略は20銘柄まで
+    const many = Array.from({ length: 500 }, (_, i) => String(1000 + i));
+    expect(parseSettings({ symbols: many, strategy: "gapopen" }).symbols).toHaveLength(500);
     expect(() => parseSettings({ symbols: many.slice(0, 21), strategy: "orb" })).toThrow();
     expect(() => parseSettings({ strategy: "orb" }, parseSettings({ symbols: many, strategy: "gapopen" }))).toThrow();
     expect(() => parseSettings({ symbols: [...many, "9999"], strategy: "gapopen" })).toThrow();

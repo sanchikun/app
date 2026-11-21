@@ -3,7 +3,9 @@
  * 過去の検証は条件を選んだ分だけ良く見えるので、ここでの成績が本当の答え合わせになる。
  *   npx tsx scripts/lab-fetch.ts && npx tsx scripts/lab-forward.ts     # .cachev を消してから取得し直すと最新になる
  *   npx tsx scripts/lab-forward.ts --since 2026-01-01                  # 動作確認用に、固定日より前から数える
+ * 候補9（TOPIX500 全体）は、先に npx tsx scripts/lab-fetch-topix.ts で .cachet を作ってあるときだけ出る。
  */
+import { existsSync } from "node:fs";
 import { ETFS, build, f, stat } from "./lab";
 import type { Rec } from "./lab";
 
@@ -25,9 +27,13 @@ const gapOpen = (cond: (r: Rec) => boolean) => (d: string): number | null => {
   return r.lowPct <= -0.005 ? -0.0053 : r.intra;
 };
 /** 安寄り買いを n 銘柄に分ける: ギャップの大きい順に、1銘柄 budget 円に収まる株数（100株単位）を買う。損益率は n×budget に対する割合 */
-const gapOpenMulti = (n: number, budget: number, short = false) => (d: string): number | null => {
+/** TOPIX500 全体（本番を 2026-12-19 に広げる対象）。今の260銘柄から TOPIX500 でない3銘柄を除き、.cachet の235銘柄を足す */
+const DROP = ["6103.T", "6594.T", "7004.T"];
+const topixRest = existsSync(".cachet") ? build(() => true, ".cachet") : null;
+const topixDay = (d: string) => [...stocks.byDay.get(d)!.filter((r) => !DROP.includes(r.s)), ...(topixRest?.byDay.get(d) ?? [])];
+const gapOpenMulti = (n: number, budget: number, short = false, pool: (d: string) => Rec[] = (d) => stocks.byDay.get(d)!) => (d: string): number | null => {
   // short なら高く寄った順に売る（損切りは寄り値の0.5%上）
-  const c = stocks.byDay.get(d)!.filter((r) => (short ? r.gap >= 0.01 : r.gap <= -0.01)).sort((a, b) => (short ? b.gap - a.gap : a.gap - b.gap));
+  const c = pool(d).filter((r) => (short ? r.gap >= 0.01 : r.gap <= -0.01)).sort((a, b) => (short ? b.gap - a.gap : a.gap - b.gap));
   let pnl = 0, k = 0;
   for (const r of c) {
     if (k >= n) break;
@@ -47,6 +53,7 @@ const RULES: [string, number, (d: string) => number | null, string?][] = [
   ["候補3b：米国-2%以下の翌日、1570 を寄りで買い引けで売る", 300000, (d) => { const r = lev.get(d); return r && r.us <= -0.02 ? r.intra : null; }],
   ["候補5（11/21〜）：安寄り買いを2銘柄×25万円に分ける（条件なし）", 500000, gapOpenMulti(2, 250000), FROZEN2],
   ["候補5b（11/21〜）：3銘柄×50万円に分ける（条件なし）", 1500000, gapOpenMulti(3, 500000), FROZEN2],
+  ...(topixRest ? [["候補9（11/21〜）：対象を TOPIX500 全体に広げて2銘柄×25万円（条件なし）", 500000, gapOpenMulti(2, 250000, false, topixDay), FROZEN2] as [string, number, (d: string) => number | null, string]] : []),
   ["候補6（11/21〜）：高く寄った上位2銘柄×25万円を空売りし、引けで買い戻す", 500000, gapOpenMulti(2, 250000, true), FROZEN2],
 ];
 console.log(`${since} より後の ${days.length} 営業日（${days[0] ?? "-"}〜${days[days.length - 1] ?? "-"}）`);

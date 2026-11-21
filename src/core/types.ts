@@ -86,7 +86,7 @@ export interface Settings {
  * 対象銘柄の上限。日足で動かす戦略（安寄り買い、持ち越し）は、株価を1回の定期実行で少しずつ順に取りにいくので多くてよい。
  * 分足で動かす戦略は毎分すべての銘柄を取りにいくので、MAX_INTRADAY_SYMBOLS まで。
  */
-export const MAX_SYMBOLS = 300;
+export const MAX_SYMBOLS = 500;
 export const MAX_INTRADAY_SYMBOLS = 20;
 const DAILY_STRATEGIES: readonly StrategyName[] = ["gapopen", "overnight", "gapopen_overnight"];
 

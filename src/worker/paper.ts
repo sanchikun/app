@@ -115,7 +115,7 @@ export async function paperTick(db: D1Database, provider: DataProvider, now: num
 /** 1回の定期実行で株価を取りにいく銘柄数。Workers の外部リクエスト数の上限（無料プランは1回50）に収める */
 const FETCH_BATCH = 30;
 /** 安寄り買い: この時刻（JST、分）を過ぎたら、寄り値がそろっていなくても取れた銘柄で判断する。株価は約20分遅れで届く */
-const GAP_DECIDE_BY = 9 * 60 + 45;
+const GAP_DECIDE_BY = 10 * 60;
 /** 安寄り買い: この時刻（JST、分）を過ぎても1銘柄も寄り付いていなければ休場とみなし、株価を取りにいく回数を減らす */
 const QUIET_AFTER = 10 * 60;
 
