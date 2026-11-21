@@ -25,7 +25,7 @@ export interface Rec {
 }
 const ok = (b: DailyBar) => b.o > 0 && b.h >= Math.max(b.o, b.c) && b.l <= Math.min(b.o, b.c);
 export const mean = (a: number[]) => a.reduce((x, y) => x + y, 0) / a.length;
-const load = (name: string) => JSON.parse(readFileSync(`${CACHE}/${name}-1d-10y.json`, "utf8")) as DailyBar[];
+const load = (name: string, dir = CACHE) => JSON.parse(readFileSync(`${dir}/${name}-1d-10y.json`, "utf8")) as DailyBar[];
 
 /** 日付 d より前の直近の値を返す関数を作る（米国の D 日の引けは、日本の D+1 日の寄り付き前） */
 function before(name: string, f: (bars: DailyBar[], i: number) => number): (d: string) => number {
@@ -41,12 +41,13 @@ function before(name: string, f: (bars: DailyBar[], i: number) => number): (d: s
 const chg = (bars: DailyBar[], i: number) => bars[i].c / bars[i - 1].c - 1;
 const usAt = before("_GSPC", chg), vixAt = before("_VIX", (b, i) => b[i].c), jpyAt = before("JPY_X", chg), soxAt = before("_SOX", chg);
 
-export function build(symbols: (s: string) => boolean): { recs: Rec[]; byDay: Map<string, Rec[]>; days: string[] } {
+/** dir を変えると別の銘柄群（lab-fetch-wide.ts が .cachew に保存したもの）で作る。相場平均はその銘柄群の中での平均になる */
+export function build(symbols: (s: string) => boolean, dir = CACHE): { recs: Rec[]; byDay: Map<string, Rec[]>; days: string[] } {
   const recs: Rec[] = [];
-  for (const f of readdirSync(CACHE).filter((f) => /^\w{4}\.T-1d-10y\.json$/.test(f))) {
+  for (const f of readdirSync(dir).filter((f) => /^\w{4}\.T-1d-10y\.json$/.test(f))) {
     const s = f.split("-")[0];
     if (!symbols(s)) continue;
-    const bars = load(s);
+    const bars = load(s, dir);
     let prev: Rec | undefined;
     for (let i = 201; i < bars.length; i++) {
       const b = bars[i], p = bars[i - 1];
