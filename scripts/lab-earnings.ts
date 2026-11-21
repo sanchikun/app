@@ -12,7 +12,10 @@ import { tickSize } from "../src/core/market";
 import { CACHE, ETFS, build, f, mean, stat } from "./lab";
 import type { Rec } from "./lab";
 
-const FROM = "2024-09-02", TO = "2026-08-28";
+// --from / --to で期間を変えられる。答え合わせは `--from 2026-11-24`（候補8を決めた日より後）で見る。
+// 無料プランの開示日は12週間遅れなので、直近の期間は時間がたってから .cachev/jq-fins-*.json を取り直す必要がある
+const arg = (name: string, def: string) => { const i = process.argv.indexOf(`--${name}`); return i >= 0 ? process.argv[i + 1] : def; };
+const FROM = arg("from", "2024-09-02"), TO = arg("to", "2026-08-28");
 const u = build((s) => !ETFS.includes(s));
 type Kind = "after" | "afterIntra" | "today" | "none";
 interface Disc { d: string; t: string; type: string }
