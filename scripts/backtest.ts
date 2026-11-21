@@ -46,6 +46,8 @@ if (args.includes("--overnight-skip-us-holidays")) overrides.overnightSkipUsHoli
 if (flag("gap-positions")) overrides.gapMaxPositions = Number(flag("gap-positions"));
 if (flag("gap-position-yen")) overrides.gapPositionYen = Number(flag("gap-position-yen"));
 if (flag("max-trades")) overrides.maxTradesPerDay = Number(flag("max-trades"));
+if (flag("gap-exit-at")) overrides.gapExitAt = flag("gap-exit-at");
+if (flag("gap-stop-from")) overrides.gapStopFrom = flag("gap-stop-from");
 if (flag("gap-prev-drop")) overrides.gapPrevDropPct = Number(flag("gap-prev-drop"));
 if (flag("overnight-weekdays")) overrides.overnightWeekdays = flag("overnight-weekdays")!.split(",").map(Number);
 if (flag("overnight-symbols")) overrides.overnightSymbols = flag("overnight-symbols")!.split(",");
@@ -59,6 +61,7 @@ if ((flag("strategy") ?? "") in DAILY) {
   const s = { ...parseSettings(overrides, DEFAULT_SETTINGS), symbols: list };
   const range = flag("range") ?? "10y";
   const data = await loadDaily([...new Set([...list, ...s.overnightSymbols])], range, flag("cache"));
+  if (s.gapExitAt || s.gapStopFrom) console.log("注意: gapExitAt（時刻を決めて売る）と gapStopFrom（損切りを遅らせる）は分足が要るので、この日足のバックテストには反映されません（引け売り・寄りから損切りで計算）。");
   const result = runGapOpenBacktest(data, s);
   const m = result.summary;
   const rules = [

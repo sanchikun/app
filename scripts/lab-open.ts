@@ -141,3 +141,33 @@ if (c1.length) {
   const tk = c1.map(({ c }) => c.tick / c.open);
   console.log(`  最初の1分間の安値（寄り値比）: 中央${f(q(fm, 0.5) * 100, 6, 2)}% 下位25%${f(q(fm, 0.25) * 100, 6, 2)}% 下位10%${f(q(fm, 0.1) * 100, 6, 2)}%   1ティックは平均${f(mean(tk) * 1e4, 5)}bp`);
 }
+
+// ---- アプリの設定（gapStopFrom 09:05、gapExitAt 10:00）と同じ売り方
+/** 寄り値で買い、損切りは from 分から有効、exit 分以降の最初の足の始値で売る（どちらも1ティック引く） */
+function timed(c: Case, from: number, exit: number, stopPct = STOP): number | null {
+  const stop = c.open * (1 - stopPct);
+  for (const b of c.bars) {
+    const m = minuteOf(c.r.d, b.t) - 540;
+    if (m >= exit) return (b.o - c.tick) / c.open - 1;
+    if (m < from) continue;
+    if (b.o <= stop) return (b.o - c.tick) / c.open - 1;
+    if (b.l <= stop) return (stop - c.tick) / c.open - 1;
+  }
+  return c.close / c.open - 1;
+}
+console.log("\n=== 3) 売る時刻と損切りの開始時刻の組み合わせ（寄り値で買う。5分足60日）");
+report("引けで売る・損切りは寄りから（今の本番）", atOpen);
+for (const [from, exit] of [[5, 60], [5, 30], [5, 120], [10, 60], [30, 60], [5, 150]] as const) report(`損切り 9:${String(from).padStart(2, "0")} から・${Math.floor(9 + exit / 60)}:${String(exit % 60).padStart(2, "0")} に売る`, (c) => timed(c, from, exit));
+report("損切りなし・10:00 に売る", (c) => timed(c, 999, 60));
+console.log("  ギャップの大きい順に2銘柄×25万円（円、60日の合計）:");
+for (const [name, fn] of [["引けで売る・損切りは寄りから", atOpen], ["損切り 9:05 から・10:00 に売る", (c: Case) => timed(c, 5, 60)], ["損切り 9:05 から・引けで売る", (c: Case) => delayedStop(c, 5)], ["損切りなし・10:00 に売る", (c: Case) => timed(c, 999, 60)]] as const) {
+  const dl: number[] = [];
+  for (const d of days) {
+    let pnl = 0;
+    for (const c of cases.filter((x) => x.r.d === d && x.open * 100 <= 250000).sort((a, b) => a.r.gap - b.r.gap).slice(0, 2)) { const v = fn(c); if (v != null) pnl += Math.floor(250000 / (c.open * 100)) * 100 * c.open * v; }
+    dl.push(pnl);
+  }
+  let peak = 0, cum = 0, dd = 0;
+  for (const v of dl) { cum += v; peak = Math.max(peak, cum); dd = Math.min(dd, cum - peak); }
+  console.log(`    ${name.padEnd(26)} 合計 ${Math.round(cum).toLocaleString("ja-JP").padStart(9)}円  t${f(stat(dl).t, 5, 2)}  勝ち日 ${f((dl.filter((x) => x > 0).length / dl.length) * 100, 3, 0)}%  最悪の日 ${Math.round(Math.min(...dl)).toLocaleString("ja-JP").padStart(7)}  最大の落ち込み ${Math.round(dd).toLocaleString("ja-JP").padStart(8)}`);
+}

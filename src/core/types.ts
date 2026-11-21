@@ -62,6 +62,10 @@ export interface Settings {
   gapMaxPositions: number;
   /** 安寄り買い: 1銘柄あたりの買付金額。この金額に収まる株数（100株単位）を買う。0 なら shares の株数で買う */
   gapPositionYen: number;
+  /** 安寄り買い: "HH:MM"（JST）。この時刻以降の最初の足の始値で売る（分足を使う）。空なら大引けで売る */
+  gapExitAt: string;
+  /** 安寄り買い: "HH:MM"（JST）。損切りをこの時刻から有効にする（分足を使う）。空なら寄り付きから有効 */
+  gapStopFrom: string;
   /** 安寄り買い: 前日の終値が前々日よりこの%以上下げていた銘柄だけを買う（2日続けての下げ）。0 なら見ない */
   gapPrevDropPct: number;
   /** 持ち越し: 場中（始値から終値）の上げがこの%以上の銘柄を大引けで買う */
@@ -114,6 +118,8 @@ export const DEFAULT_SETTINGS: Settings = {
   overnightMaxPositionYen: 0,
   gapPrevDropPct: 0,
   gapMaxPositions: 1,
+  gapExitAt: "",
+  gapStopFrom: "",
   gapPositionYen: 0,
   overnightShares: 0,
   overnightWeekdays: [],
@@ -227,6 +233,11 @@ export function parseSettings(input: unknown, base: Settings = DEFAULT_SETTINGS)
   num("overnightMinPct", -100, 20);
   num("overnightMaxPositionYen", 0, 1e9);
   num("overnightShares", 0, 100000, true);
+  for (const key of ["gapExitAt", "gapStopFrom"] as const) {
+    if (!(key in src)) continue;
+    if (src[key] !== "" && !isHHMM(src[key])) throw new Error(`${key} must be "HH:MM" or ""`);
+    out[key] = src[key] as string;
+  }
   time("noEntryAfter");
   time("forceCloseAt");
   if ("strategy" in src) {

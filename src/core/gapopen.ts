@@ -10,8 +10,8 @@ import { monthly, summarizeDays } from "./backtest";
 import type { BacktestResult, DayResult } from "./backtest";
 import { closePosition, newDay } from "./engine";
 import type { DailyBar } from "./gapstudy";
-import { cleanPrice, roundToTick, tickSize, usMarketClosed } from "./market";
-import type { DayState, ExitReason, Position, Settings, Trade } from "./types";
+import { cleanPrice, hhmmToMinutes, jstMinutes, roundToTick, tickSize, usMarketClosed } from "./market";
+import type { Bar, DayState, ExitReason, Position, Settings, Trade } from "./types";
 
 /** その日ここまでの日足の値。prevClose は配当落ちを調整した前日終値 */
 export interface OpenQuote {
@@ -53,6 +53,30 @@ export function openQuote(bars: DailyBar[], i: number, maxGapPct = 25): OpenQuot
   return { prevClose, open: b.o, low: b.l, close: b.c, ...(b.dividend ? { dividend: b.dividend } : {}), ...(base > 0 ? { prevReturnPct: ((p.c - base) / base) * 100 } : {}) };
 }
 
+/** 安寄り買いの売りを分足で判定する設定か（時刻を決めて売る、または損切りを遅らせる） */
+export const usesIntradayExit = (s: Settings) => s.gapExitAt !== "" || s.gapStopFrom !== "";
+
+/**
+ * 分足で見た安寄り買いの売り。bars はその日の確定した足（時刻順）。
+ * - gapStopFrom 以降の足で、始値がすでに損切りの値以下ならその始値で、足の安値が届けば損切りの値で売る（どちらも滑りを引く）。
+ * - gapExitAt 以降の最初の足の始値で売る（成行なので滑りを引く）。同じ足なら、始値で売るので損切りより先。
+ * どちらにも当たらなければ null（持ち続ける）。
+ */
+export function gapIntradayExit(pos: Position, bars: Bar[], s: Settings, fine: boolean): { t: number; price: number; reason: ExitReason } | null {
+  const stopFrom = s.gapStopFrom ? hhmmToMinutes(s.gapStopFrom) : 0;
+  const exitAt = s.gapExitAt ? hhmmToMinutes(s.gapExitAt) : Infinity;
+  const slip = (price: number) => s.slippageTicks * tickSize(price, fine);
+  for (const b of bars) {
+    if (b.t < pos.entryT) continue;
+    const mins = jstMinutes(b.t);
+    if (mins >= exitAt) return { t: b.t, price: b.o - slip(b.o), reason: b.o <= pos.stop ? "stop_loss" : "force_close" };
+    if (mins < stopFrom) continue;
+    if (b.o <= pos.stop) return { t: b.t, price: b.o - slip(b.o), reason: "stop_loss" };
+    if (b.l <= pos.stop) return { t: b.t, price: pos.stop - slip(pos.stop), reason: "stop_loss" };
+  }
+  return null;
+}
+
 /** 安寄り買いで保有中のポジション（持ち越しのポジションは含まない） */
 export function gapPositions(state: DayState): Position[] {
   return [...(state.position && !state.position.overnight ? [state.position] : []), ...(state.more ?? [])];
@@ -76,7 +100,7 @@ export function closeGapPosition(state: DayState, s: Settings, pos: Position, t:
  *   gapPrevDropPct があれば、前日もそれ以上下げていた銘柄だけを候補にする（前日の騰落が分からない銘柄は見送る）。
  * - 保有中の銘柄は、安値が損切りの値以下なら損切り、dayComplete なら終値で決済する。
  */
-export function gapOpenTick(state: DayState, s: Settings, quotes: Record<string, OpenQuote>, now: number, dayComplete: boolean): Trade[] {
+export function gapOpenTick(state: DayState, s: Settings, quotes: Record<string, OpenQuote>, now: number, dayComplete: boolean, intraday?: Record<string, Bar[]>): Trade[] {
   const trades: Trade[] = [];
   const decided = (state.decided ??= []);
   const fresh = Object.keys(quotes).filter((sym) => s.symbols.includes(sym) && !decided.includes(sym));
@@ -107,7 +131,16 @@ export function gapOpenTick(state: DayState, s: Settings, quotes: Record<string,
 
   for (const pos of gapPositions(state)) {
     const q = quotes[pos.symbol];
-    if (!q) continue;
+    const bars = usesIntradayExit(s) ? intraday?.[pos.symbol] : undefined;
+    if (bars) {
+      // 分足で、時刻を決めた売りと、遅らせた損切りを判定する
+      const exit = gapIntradayExit(pos, bars, s, s.fineTickSymbols.includes(pos.symbol));
+      if (exit) trades.push(closeGapPosition(state, s, pos, exit.t, exit.price, exit.reason));
+      else if (dayComplete && q) trades.push(closeGapPosition(state, s, pos, jstTime(state.date, 15 * 60 + 30), q.close, "eod"));
+      continue;
+    }
+    // 分足を使う設定なのに分足が取れていないときは、大引け後に日足で判定する（場中は何もしない）
+    if (!q || (usesIntradayExit(s) && !dayComplete)) continue;
     if (q.low <= pos.stop) {
       const slip = s.slippageTicks * tickSize(pos.stop, s.fineTickSymbols.includes(pos.symbol));
       trades.push(closeGapPosition(state, s, pos, now, pos.stop - slip, "stop_loss"));
@@ -163,11 +196,11 @@ export function overnightEntry(state: DayState, s: Settings, quotes: Record<stri
  * 安寄り買いは 9:00〜15:30、持ち越しは 15:30〜翌 9:00 に持つので、両方を使っても同時に持つのは1ポジションまで。
  * dayComplete は大引け後で終値が確定していること。state を書き換え、決済された取引を返す。
  */
-export function dailyTick(state: DayState, s: Settings, quotes: Record<string, OpenQuote>, now: number, dayComplete: boolean): Trade[] {
+export function dailyTick(state: DayState, s: Settings, quotes: Record<string, OpenQuote>, now: number, dayComplete: boolean, intraday?: Record<string, Bar[]>): Trade[] {
   const trades = overnightExit(state, s, quotes);
   // 持ち越しがまだ寄り付いていない間は、安寄り買いの判断を待つ
   if (isCarried(state)) return trades;
-  if (runsGapOpen(s)) trades.push(...gapOpenTick(state, s, quotes, now, dayComplete));
+  if (runsGapOpen(s)) trades.push(...gapOpenTick(state, s, quotes, now, dayComplete, intraday));
   if (runsOvernight(s) && dayComplete && !state.overnightDecided && Object.keys(quotes).length > 0) {
     overnightEntry(state, s, quotes);
     state.overnightDecided = true;
@@ -179,6 +212,7 @@ export function dailyTick(state: DayState, s: Settings, quotes: Record<string, O
  * 日足でのバックテスト（安寄り買い、持ち越し、その両方）。銘柄ごとの日足を日付でそろえ、1日ずつ dailyTick に流す。
  * 持ち越したポジションは、その銘柄の次の足が出た日の寄り付きで決済する。
  * 損切りした時刻は日足からは分からないので、取引の決済時刻は大引けにしてある。
+ * gapExitAt（時刻を決めて売る）と gapStopFrom（損切りを遅らせる）は分足が要るので、ここでは使わない。
  * 持ち越した銘柄の翌営業日の足が壊れているときは、その取引を数えない。
  * 渡した銘柄はすべて対象にする。ただし overnightSymbols にだけある銘柄は、持ち越しだけの対象にする。
  */

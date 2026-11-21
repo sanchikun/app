@@ -1,5 +1,5 @@
 import { closePosition, finishDay, newDay, processBar } from "../core/engine";
-import { closeGapPosition, dailyTick, gapPositions, isDailyStrategy, jstTime, openQuote, overnightSymbols, runsGapOpen, runsOvernight } from "../core/gapopen";
+import { closeGapPosition, dailyTick, gapPositions, usesIntradayExit, isDailyStrategy, jstTime, openQuote, overnightSymbols, runsGapOpen, runsOvernight } from "../core/gapopen";
 import type { OpenQuote } from "../core/gapopen";
 import { SESSION_CLOSE, inSession, jstDate, jstMinutes } from "../core/market";
 import { DEFAULT_SETTINGS, parseSettings } from "../core/types";
@@ -197,8 +197,21 @@ async function dailyPaperTick(db: D1Database, provider: DataProvider, settings: 
   }
   const quotes: Record<string, OpenQuote> = ready ? { ...state.gathered, ...fetched } : fetched;
 
+  // 時刻を決めて売る・損切りを遅らせる設定なら、保有中の銘柄の5分足を取る。最後の足は形成中かもしれないので、大引け後までは使わない
+  const intraday: Record<string, Bar[]> = {};
+  if (usesIntradayExit(settings)) {
+    for (const held of gapPositions(state)) {
+      try {
+        const bars = (await provider.intraday(held.symbol, "5m", "1d", now)).filter((b) => jstDate(b.t) === date && inSession(b.t));
+        intraday[held.symbol] = dayComplete ? bars : bars.slice(0, -1);
+      } catch (e) {
+        errors.push(`${held.symbol}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+  }
+
   // 寄り値がそろうまでは安寄り買いの判断をさせない（保有中の銘柄の損切りと決済は動かす）
-  const trades = dailyTick(state, ready ? settings : { ...settings, symbols: [] }, quotes, now, dayComplete);
+  const trades = dailyTick(state, ready ? settings : { ...settings, symbols: [] }, quotes, now, dayComplete, intraday);
   // 判断が済んだ銘柄の値は捨てる（持ち越しの決済待ちで判断が先送りになった銘柄は残す）
   for (const sym of Object.keys(state.gathered ?? {})) if (state.decided?.includes(sym)) delete state.gathered![sym];
   if (state.gathered && Object.keys(state.gathered).length === 0) delete state.gathered;

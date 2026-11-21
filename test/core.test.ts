@@ -356,6 +356,31 @@ describe("安寄り買い", async () => {
     expect(state.tradeCount).toBe(2);
   });
 
+  it("gapExitAt と gapStopFrom: 分足で、損切りは 9:05 から、売りは 10:00 の足の始値", async () => {
+    const { gapIntradayExit } = await import("../src/core/gapopen");
+    const T: Settings = { ...G, gapExitAt: "10:00", gapStopFrom: "09:05" };
+    const at = (hhmm: string) => jstTime("2026-11-18", Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3)));
+    const bar = (hhmm: string, o: number, l: number, c = o) => ({ t: at(hhmm), o, h: Math.max(o, c), l, c, v: 1000 });
+    const pos = { symbol: "1111.T", side: "long" as const, shares: 100, entryT: OPEN, entryPrice: 1970, stop: 1960, target: 197000 };
+    // 9:00 の足で損切りの値を割っても無視し、9:05 以降に届かなければ 10:00 の足の始値から1ティック引いて売る
+    expect(gapIntradayExit(pos, [bar("09:00", 1970, 1950), bar("09:05", 1965, 1962), bar("09:55", 1980, 1975), bar("10:00", 1985, 1980)], T, false)).toEqual({ t: at("10:00"), price: 1984, reason: "force_close" });
+    // 9:05 の足の始値がすでに損切りより下なら、その始値で売る
+    expect(gapIntradayExit(pos, [bar("09:05", 1955, 1950)], T, false)).toEqual({ t: at("09:05"), price: 1954, reason: "stop_loss" });
+    // 9:05 以降に安値が届けば損切りの値で売る
+    expect(gapIntradayExit(pos, [bar("09:05", 1965, 1962), bar("09:10", 1964, 1958)], T, false)).toEqual({ t: at("09:10"), price: 1959, reason: "stop_loss" });
+    // まだ 10:00 の足がなければ持ち続ける
+    expect(gapIntradayExit(pos, [bar("09:05", 1965, 1962), bar("09:10", 1966, 1963)], T, false)).toBeNull();
+
+    // gapOpenTick: 分足があればそれで判定し、日足の安値（寄り付き直後に割った分）では損切りしない
+    const state = newDay("2026-11-18");
+    gapOpenTick(state, T, { "1111.T": q(1970, 1970, 1970) }, NOW, false, {});
+    expect(gapOpenTick(state, T, { "1111.T": q(1970, 1950, 1975) }, NOW, false, { "1111.T": [bar("09:00", 1970, 1950), bar("09:05", 1965, 1962)] })).toHaveLength(0);
+    expect(gapOpenTick(state, T, { "1111.T": q(1970, 1950, 1990) }, NOW, false, { "1111.T": [bar("09:05", 1965, 1962), bar("10:00", 1985, 1980)] })).toMatchObject([{ exitPrice: 1984, reason: "force_close", pnl: 1400 }]);
+    expect(state.position).toBeNull();
+    expect(() => parseSettings({ gapExitAt: "10時" }, DEFAULT_SETTINGS)).toThrow();
+    expect(parseSettings({ gapExitAt: "", gapStopFrom: "09:05" }, DEFAULT_SETTINGS)).toMatchObject({ gapExitAt: "", gapStopFrom: "09:05" });
+  });
+
   it("ギャップが足りない銘柄は見送り、あとから入り直さない", () => {
     const state = newDay("2026-11-18");
     gapOpenTick(state, G, { "1111.T": q(1990, 1985, 1990) }, NOW, false);
