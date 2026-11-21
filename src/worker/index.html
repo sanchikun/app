@@ -141,8 +141,9 @@ async function refresh() {
     $("pnl").className = `big ${cls(s.realizedPnl)}`;
     $("progress").textContent = `${s.dailyTargetYen > 0 ? `利益 ${yen(s.dailyTargetYen)} で終了` : "利益の上限なし"}・損失上限 ${yen(-s.dailyLossLimitYen)}・取引 ${s.tradeCount}回`;
     $("state").textContent = s.halted ? HALT[s.halted] : s.enabled ? "稼働中" : "停止中";
-    $("position").textContent = s.position
-      ? `保有中: ${s.position.symbol} ${SIDE[s.position.side]} ${s.position.shares}株 @${s.position.entryPrice}（損切り ${s.position.stop}／利確 ${s.position.target}）`
+    const held = [...(s.position ? [s.position] : []), ...(s.morePositions ?? [])];
+    $("position").textContent = held.length
+      ? `保有中: ${held.map((p) => `${p.symbol} ${SIDE[p.side]} ${p.shares}株 @${p.entryPrice}（損切り ${p.stop}）`).join("、")}`
       : "保有なし";
     $("toggle").textContent = s.enabled ? "停止する" : "開始する";
     table($("daily"), ["日付", "損益", "取引", "状態"], d.daily.map((r) => [r.date, [yen(r.pnl), cls(r.pnl)], `${r.trades}回`, HALT[r.halted] ?? ""]), "まだ記録がありません");

@@ -1,5 +1,5 @@
 import { closePosition, finishDay, newDay, processBar } from "../core/engine";
-import { dailyTick, isDailyStrategy, jstTime, openQuote, overnightSymbols, runsGapOpen, runsOvernight } from "../core/gapopen";
+import { closeGapPosition, dailyTick, gapPositions, isDailyStrategy, jstTime, openQuote, overnightSymbols, runsGapOpen, runsOvernight } from "../core/gapopen";
 import type { OpenQuote } from "../core/gapopen";
 import { SESSION_CLOSE, inSession, jstDate, jstMinutes } from "../core/market";
 import { DEFAULT_SETTINGS, parseSettings } from "../core/types";
@@ -145,15 +145,18 @@ async function dailyPaperTick(db: D1Database, provider: DataProvider, settings: 
       statements.push(...saveStatements(db, prevState, []));
     } else if (prevState && pos) {
       // 安寄り買いのポジションが残っていたら（大引け後の処理が動かなかった場合）、その日の日足で決済する
-      try {
-        const bar = (await provider.daily(pos.symbol, "1mo", now)).find((b) => b.date === prevState.date);
-        if (!bar) throw new Error(`${prevState.date} の日足がありません`);
-        const stopped = bar.l <= pos.stop;
-        const closed = closePosition(prevState, settings, jstTime(prevState.date, SESSION_CLOSE), stopped ? pos.stop : bar.c, stopped ? "stop_loss" : "eod");
-        statements.push(...saveStatements(db, prevState, [closed]));
-      } catch (e) {
-        errors.push(`${pos.symbol}: ${e instanceof Error ? e.message : String(e)}`);
+      const closed: Trade[] = [];
+      for (const left of gapPositions(prevState)) {
+        try {
+          const bar = (await provider.daily(left.symbol, "1mo", now)).find((b) => b.date === prevState.date);
+          if (!bar) throw new Error(`${prevState.date} の日足がありません`);
+          const stopped = bar.l <= left.stop;
+          closed.push(closeGapPosition(prevState, settings, left, jstTime(prevState.date, SESSION_CLOSE), stopped ? left.stop : bar.c, stopped ? "stop_loss" : "eod"));
+        } catch (e) {
+          errors.push(`${left.symbol}: ${e instanceof Error ? e.message : String(e)}`);
+        }
       }
+      if (closed.length > 0) statements.push(...saveStatements(db, prevState, closed));
     }
   }
 
@@ -172,7 +175,7 @@ async function dailyPaperTick(db: D1Database, provider: DataProvider, settings: 
       errors.push(`${symbol}: ${e instanceof Error ? e.message : String(e)}`);
     }
   };
-  if (state.position) await fetchQuote(state.position.symbol);
+  for (const held of [state.position, ...(state.more ?? [])]) if (held) await fetchQuote(held.symbol);
   if (runsOvernight(settings) && dayComplete && !state.overnightDecided) for (const sym of overnightSymbols(settings).slice(0, FETCH_BATCH)) await fetchQuote(sym);
 
   // 安寄り買い: 寄り値をまだ取れていない銘柄を、1回に FETCH_BATCH ずつ順に取りにいく。全銘柄がそろう（または

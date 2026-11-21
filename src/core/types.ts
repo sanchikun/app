@@ -58,6 +58,10 @@ export interface Settings {
   gapStopPct: number;
   /** 安寄り買い: 1回の買付金額（株価×株数）がこれを超える銘柄は見送る。0 なら上限なし */
   maxPositionYen: number;
+  /** 安寄り買い: 同時に持つ銘柄数の上限。条件に合う銘柄をギャップの大きい順にこの数まで買う */
+  gapMaxPositions: number;
+  /** 安寄り買い: 1銘柄あたりの買付金額。この金額に収まる株数（100株単位）を買う。0 なら shares の株数で買う */
+  gapPositionYen: number;
   /** 安寄り買い: 前日の終値が前々日よりこの%以上下げていた銘柄だけを買う（2日続けての下げ）。0 なら見ない */
   gapPrevDropPct: number;
   /** 持ち越し: 場中（始値から終値）の上げがこの%以上の銘柄を大引けで買う */
@@ -109,6 +113,8 @@ export const DEFAULT_SETTINGS: Settings = {
   overnightMinPct: 2,
   overnightMaxPositionYen: 0,
   gapPrevDropPct: 0,
+  gapMaxPositions: 1,
+  gapPositionYen: 0,
   overnightShares: 0,
   overnightWeekdays: [],
   overnightSymbols: [],
@@ -157,6 +163,8 @@ export interface DayState {
   bars: Record<string, Bar[]>;
   /** 銘柄ごとの前営業日の終値（ギャップを見る戦略が使う） */
   prevClose?: Record<string, number>;
+  /** 安寄り買いで2銘柄以上を持つときの、2銘柄目以降（1銘柄目は position に入る） */
+  more?: Position[];
   /** 安寄り買いで、その日の寄り付きを見て入るかどうかを決め終えた銘柄 */
   decided?: string[];
   /** 持ち越しで、その日の大引けに買うかどうかを決め終えたか */
@@ -214,6 +222,8 @@ export function parseSettings(input: unknown, base: Settings = DEFAULT_SETTINGS)
   num("gapStopPct", 0.1, 10);
   num("maxPositionYen", 0, 1e9);
   num("gapPrevDropPct", 0, 20);
+  num("gapMaxPositions", 1, 10, true);
+  num("gapPositionYen", 0, 1e9);
   num("overnightMinPct", -100, 20);
   num("overnightMaxPositionYen", 0, 1e9);
   num("overnightShares", 0, 100000, true);

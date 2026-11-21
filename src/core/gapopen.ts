@@ -11,7 +11,7 @@ import type { BacktestResult, DayResult } from "./backtest";
 import { closePosition, newDay } from "./engine";
 import type { DailyBar } from "./gapstudy";
 import { cleanPrice, roundToTick, tickSize, usMarketClosed } from "./market";
-import type { DayState, Settings, Trade } from "./types";
+import type { DayState, ExitReason, Position, Settings, Trade } from "./types";
 
 /** その日ここまでの日足の値。prevClose は配当落ちを調整した前日終値 */
 export interface OpenQuote {
@@ -53,10 +53,26 @@ export function openQuote(bars: DailyBar[], i: number, maxGapPct = 25): OpenQuot
   return { prevClose, open: b.o, low: b.l, close: b.c, ...(b.dividend ? { dividend: b.dividend } : {}), ...(base > 0 ? { prevReturnPct: ((p.c - base) / base) * 100 } : {}) };
 }
 
+/** 安寄り買いで保有中のポジション（持ち越しのポジションは含まない） */
+export function gapPositions(state: DayState): Position[] {
+  return [...(state.position && !state.position.overnight ? [state.position] : []), ...(state.more ?? [])];
+}
+
+/** 安寄り買いのポジションを1つ決済する。1銘柄目を決済したら、2銘柄目以降を前に詰める */
+export function closeGapPosition(state: DayState, s: Settings, pos: Position, t: number, price: number, reason: ExitReason): Trade {
+  const rest = gapPositions(state).filter((p) => p !== pos);
+  state.position = pos;
+  const trade = closePosition(state, s, t, price, reason);
+  state.position = rest.shift() ?? null;
+  if (rest.length > 0) state.more = rest;
+  else delete state.more;
+  return trade;
+}
+
 /**
  * 1回分の処理。quotes には寄り付いた銘柄のその時点の値を渡す。state を書き換え、決済された取引を返す。
  * - まだ判断していない銘柄は、ここで入るかどうかを決める（あとから同じ銘柄に入り直すことはない）。
- *   同時に持つのは1ポジションまでなので、条件に合う銘柄が複数あればギャップが最も大きいものを買う。
+ *   条件に合う銘柄をギャップの大きい順に gapMaxPositions 銘柄まで買う（既定は1銘柄）。
  *   gapPrevDropPct があれば、前日もそれ以上下げていた銘柄だけを候補にする（前日の騰落が分からない銘柄は見送る）。
  * - 保有中の銘柄は、安値が損切りの値以下なら損切り、dayComplete なら終値で決済する。
  */
@@ -69,30 +85,34 @@ export function gapOpenTick(state: DayState, s: Settings, quotes: Record<string,
   const gap = (sym: string) => (quotes[sym].open - quotes[sym].prevClose) / quotes[sym].prevClose;
   const dropped = (sym: string) => s.gapPrevDropPct <= 0 || (quotes[sym].prevReturnPct ?? 0) <= -s.gapPrevDropPct;
   const candidates = fresh.filter((sym) => gap(sym) * 100 <= -s.gapMinPct && dropped(sym)).sort((a, b) => gap(a) - gap(b));
+  const max = Math.max(1, s.gapMaxPositions);
   for (const symbol of candidates) {
-    if (state.position || state.halted) break;
+    if (gapPositions(state).length >= max || state.halted || isCarried(state)) break;
     const fine = s.fineTickSymbols.includes(symbol);
     const entry = quotes[symbol].open;
-    if (s.maxPositionYen > 0 && entry * s.shares > s.maxPositionYen) continue;
+    const shares = s.gapPositionYen > 0 ? Math.floor(s.gapPositionYen / (entry * 100)) * 100 : s.shares;
+    if (shares <= 0 || (s.maxPositionYen > 0 && entry * shares > s.maxPositionYen)) continue;
     const tick = tickSize(entry, fine);
     const slip = s.slippageTicks * tick;
-    // 損切り時の損失がその日の残りの損失枠に収まるよう、損切り幅を狭める
-    const budget = s.dailyLossLimitYen + state.realizedPnl - 2 * s.commissionPerOrderYen;
-    const maxDist = cleanPrice(Math.floor((budget / s.shares - slip) / tick + 1e-6) * tick);
+    // 損切り時の損失がその日の残りの損失枠に収まるよう、損切り幅を狭める。複数銘柄を持つときは枠を銘柄数で割る
+    const budget = (s.dailyLossLimitYen + state.realizedPnl) / max - 2 * s.commissionPerOrderYen;
+    const maxDist = cleanPrice(Math.floor((budget / shares - slip) / tick + 1e-6) * tick);
     if (maxDist < tick) continue;
     const stop = Math.max(roundToTick(entry * (1 - s.gapStopPct / 100), "down", fine), cleanPrice(entry - maxDist));
     // 利確は置かない。届かない値を入れておく
-    state.position = { symbol, side: "long", shares: s.shares, entryT: jstTime(state.date, 9 * 60), entryPrice: entry, stop, target: cleanPrice(entry * 100) };
+    const pos: Position = { symbol, side: "long", shares, entryT: jstTime(state.date, 9 * 60), entryPrice: entry, stop, target: cleanPrice(entry * 100) };
+    if (!state.position) state.position = pos;
+    else (state.more ??= []).push(pos);
   }
 
-  const pos = state.position;
-  const q = pos && !pos.overnight ? quotes[pos.symbol] : undefined;
-  if (pos && q) {
+  for (const pos of gapPositions(state)) {
+    const q = quotes[pos.symbol];
+    if (!q) continue;
     if (q.low <= pos.stop) {
       const slip = s.slippageTicks * tickSize(pos.stop, s.fineTickSymbols.includes(pos.symbol));
-      trades.push(closePosition(state, s, now, pos.stop - slip, "stop_loss"));
+      trades.push(closeGapPosition(state, s, pos, now, pos.stop - slip, "stop_loss"));
     } else if (dayComplete) {
-      trades.push(closePosition(state, s, jstTime(state.date, 15 * 60 + 30), q.close, "eod"));
+      trades.push(closeGapPosition(state, s, pos, jstTime(state.date, 15 * 60 + 30), q.close, "eod"));
     }
   }
   return trades;

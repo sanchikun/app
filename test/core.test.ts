@@ -337,6 +337,25 @@ describe("安寄り買い", async () => {
     expect(openQuote(bars, 1)?.prevReturnPct).toBeUndefined();
   });
 
+  it("gapMaxPositions が2なら、ギャップの大きい順に2銘柄を予算内の株数で買い、別々に決済する", () => {
+    const M: Settings = { ...G, gapMaxPositions: 2, gapPositionYen: 250000, symbols: ["1111.T", "2222.T", "3333.T", "4444.T"] };
+    const state = newDay("2026-11-18");
+    // 4444 は100株で25万円を超えるので飛ばす。残りはギャップの大きい順に 3333（-3%）、1111（-1.5%）
+    const quotes = { "1111.T": q(1970, 1965, 1968), "2222.T": q(1978, 1970, 1975), "3333.T": { prevClose: 800, open: 776, low: 775, close: 790 }, "4444.T": { prevClose: 3000, open: 2850, low: 2850, close: 2900 } };
+    expect(gapOpenTick(state, M, quotes, NOW, false)).toHaveLength(0);
+    expect(state.position).toMatchObject({ symbol: "3333.T", shares: 300, entryPrice: 776 });
+    expect(state.more).toMatchObject([{ symbol: "1111.T", shares: 100, entryPrice: 1970, stop: 1960 }]);
+    // 1銘柄目だけ損切りにかかる → 2銘柄目が position に繰り上がる
+    const stopped = gapOpenTick(state, M, { ...quotes, "3333.T": { prevClose: 800, open: 776, low: 770, close: 780 } }, NOW, false);
+    expect(stopped).toMatchObject([{ symbol: "3333.T", reason: "stop_loss", shares: 300 }]);
+    expect(state.position?.symbol).toBe("1111.T");
+    expect(state.more).toBeUndefined();
+    // 大引けで残りを終値で決済する
+    expect(gapOpenTick(state, M, quotes, NOW, true)).toMatchObject([{ symbol: "1111.T", reason: "eod", exitPrice: 1968 }]);
+    expect(state.position).toBeNull();
+    expect(state.tradeCount).toBe(2);
+  });
+
   it("ギャップが足りない銘柄は見送り、あとから入り直さない", () => {
     const state = newDay("2026-11-18");
     gapOpenTick(state, G, { "1111.T": q(1990, 1985, 1990) }, NOW, false);

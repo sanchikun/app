@@ -43,6 +43,9 @@ if (flag("overnight-min")) overrides.overnightMinPct = Number(flag("overnight-mi
 if (flag("overnight-max-position")) overrides.overnightMaxPositionYen = Number(flag("overnight-max-position"));
 if (flag("overnight-shares")) overrides.overnightShares = Number(flag("overnight-shares"));
 if (args.includes("--overnight-skip-us-holidays")) overrides.overnightSkipUsHolidays = true;
+if (flag("gap-positions")) overrides.gapMaxPositions = Number(flag("gap-positions"));
+if (flag("gap-position-yen")) overrides.gapPositionYen = Number(flag("gap-position-yen"));
+if (flag("max-trades")) overrides.maxTradesPerDay = Number(flag("max-trades"));
 if (flag("gap-prev-drop")) overrides.gapPrevDropPct = Number(flag("gap-prev-drop"));
 if (flag("overnight-weekdays")) overrides.overnightWeekdays = flag("overnight-weekdays")!.split(",").map(Number);
 if (flag("overnight-symbols")) overrides.overnightSymbols = flag("overnight-symbols")!.split(",");
@@ -59,7 +62,7 @@ if ((flag("strategy") ?? "") in DAILY) {
   const result = runGapOpenBacktest(data, s);
   const m = result.summary;
   const rules = [
-    ...(s.strategy !== "overnight" ? [`${s.gapPrevDropPct > 0 ? `前日${s.gapPrevDropPct}%以上下げ、` : ""}${s.gapMinPct}%以上安く寄ったら寄りで買い、${s.gapStopPct}%で損切り、引けで売り`] : []),
+    ...(s.strategy !== "overnight" ? [`${s.gapPrevDropPct > 0 ? `前日${s.gapPrevDropPct}%以上下げ、` : ""}${s.gapMinPct}%以上安く寄ったら${s.gapMaxPositions > 1 ? `${s.gapMaxPositions}銘柄まで` : ""}${s.gapPositionYen > 0 ? `1銘柄${s.gapPositionYen}円分を` : ""}寄りで買い、${s.gapStopPct}%で損切り、引けで売り`] : []),
     ...(s.strategy !== "gapopen" ? [`${s.overnightSymbols.length > 0 ? `${s.overnightSymbols.join("・")} を` : ""}${s.overnightWeekdays.length > 0 ? `${s.overnightWeekdays.map((d) => "日月火水木金土"[d]).join("・")}曜の` : ""}${s.overnightMinPct > -100 ? `場中に${s.overnightMinPct}%以上上げたら` : ""}引けで買い、翌朝の寄りで売り${s.overnightSkipUsHolidays ? "（米国が休みの日は買わない）" : ""}`] : []),
   ];
   console.log(`${result.symbol}  ${DAILY[s.strategy as keyof typeof DAILY]}（${rules.join("／")}）  日足 × ${range}  ${s.shares}株  損失上限 ${s.dailyLossLimitYen}円${s.maxPositionYen > 0 ? `  買付上限 ${s.maxPositionYen}円` : ""}${s.overnightMaxPositionYen > 0 ? `  持ち越しの買付上限 ${s.overnightMaxPositionYen}円` : ""}`);
