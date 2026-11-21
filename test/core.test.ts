@@ -421,6 +421,22 @@ describe("上げた日の持ち越し", async () => {
     expect(parseSettings({ overnightSymbols: ["1306"], overnightWeekdays: [1, 1] }, DEFAULT_SETTINGS)).toMatchObject({ overnightSymbols: ["1306.T"], overnightWeekdays: [1] });
   });
 
+  it("overnightSkipUsHolidays なら、米国市場が休みの日の大引けでは買わない", async () => {
+    const { usMarketClosed } = await import("../src/core/market");
+    // レイバーデー、キング牧師の日、日曜の独立記念日の振り替え、聖金曜日、感謝祭は休み。ふつうの月曜は開く
+    for (const d of ["2026-09-07", "2026-01-19", "2027-07-05", "2026-04-03", "2026-11-26", "2026-12-25"]) expect(usMarketClosed(d)).toBe(true);
+    for (const d of ["2026-11-23", "2026-11-16", "2026-12-24", "2027-01-04"]) expect(usMarketClosed(d)).toBe(false);
+    const E: Settings = { ...O, overnightMinPct: -100, overnightWeekdays: [1], overnightSymbols: ["1306.T"], overnightSkipUsHolidays: true };
+    const quotes = { "1306.T": q(400, 401, 399, 402) };
+    const holiday = newDay("2026-09-07");
+    dailyTick(holiday, E, quotes, OPEN, true);
+    expect(holiday.position).toBeNull();
+    expect(holiday.overnightDecided).toBe(true);
+    const normal = newDay("2026-09-14");
+    dailyTick(normal, E, quotes, OPEN, true);
+    expect(normal.position?.symbol).toBe("1306.T");
+  });
+
   it("買付上限を超える銘柄は見送り、条件に合う銘柄がなければ買わない", () => {
     const capped = newDay("2026-11-18");
     dailyTick(capped, { ...O, overnightMaxPositionYen: 150000 }, { "1111.T": q(2000, 2000, 1995, 2050), "2222.T": q(1000, 1000, 1000, 1030) }, OPEN, true);

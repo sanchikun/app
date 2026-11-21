@@ -68,6 +68,8 @@ export interface Settings {
   overnightShares: number;
   /** 持ち越し: 大引けで買う曜日（1 = 月曜 … 5 = 金曜）。空ならどの曜日でも買う */
   overnightWeekdays: number[];
+  /** 持ち越し: 米国の株式市場が休みの日（その夜に米国市場が開かない日）の大引けでは買わない */
+  overnightSkipUsHolidays: boolean;
   /** 持ち越し: 対象銘柄（ETF など）。空なら symbols と同じ。ここだけにある銘柄は安寄り買いの対象にしない */
   overnightSymbols: string[];
 }
@@ -110,6 +112,7 @@ export const DEFAULT_SETTINGS: Settings = {
   overnightShares: 0,
   overnightWeekdays: [],
   overnightSymbols: [],
+  overnightSkipUsHolidays: false,
 };
 
 export interface Signal {
@@ -194,6 +197,7 @@ export function parseSettings(input: unknown, base: Settings = DEFAULT_SETTINGS)
 
   bool("enabled");
   bool("allowShort");
+  bool("overnightSkipUsHolidays");
   num("shares", 1, 100000, true);
   num("dailyTargetYen", 0, 1e7);
   num("dailyLossLimitYen", 1, 1e7);

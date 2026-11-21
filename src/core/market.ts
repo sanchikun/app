@@ -76,3 +76,46 @@ export function groupByDate(bars: Bar[]): Map<string, Bar[]> {
   }
   return days;
 }
+
+/** 月（1〜12）の n 番目（n = -1 なら最後）の曜日 w（0 = 日曜）の日 */
+function nthWeekday(year: number, month: number, w: number, n: number): number {
+  if (n > 0) return 1 + ((w - new Date(Date.UTC(year, month - 1, 1)).getUTCDay() + 7) % 7) + (n - 1) * 7;
+  const last = new Date(Date.UTC(year, month, 0));
+  return last.getUTCDate() - ((last.getUTCDay() - w + 7) % 7);
+}
+
+/** 復活祭の日曜（グレゴリオ暦）。[月, 日] */
+function easter(year: number): [number, number] {
+  const a = year % 19, b = Math.floor(year / 100), c = year % 100, d = Math.floor(b / 4), e = b % 4;
+  const g = Math.floor((8 * b + 13) / 25), h = (19 * a + b - d - g + 15) % 30, i = Math.floor(c / 4), k = c % 4;
+  const l = (32 + 2 * e + 2 * i - h - k) % 7, m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const month = Math.floor((h + l - 7 * m + 114) / 31);
+  return [month, ((h + l - 7 * m + 114) % 31) + 1];
+}
+
+/**
+ * 米国の株式市場（NYSE）が休みの日か。"YYYY-MM-DD" は米国の日付。土日と、決まった祝日だけを見る
+ * （元日、キング牧師の日、大統領の日、聖金曜日、メモリアルデー、ジューンティーンス（2022年〜）、独立記念日、
+ * レイバーデー、感謝祭、クリスマス）。土曜の祝日は前の金曜、日曜の祝日は次の月曜が休み。臨時の休場は入っていない。
+ */
+export function usMarketClosed(date: string): boolean {
+  const [y, m, d] = date.split("-").map(Number);
+  const w = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+  if (w === 0 || w === 6) return true;
+  // 日付が決まっている祝日（土日に当たれば振り替え）。元日が土曜の年は、前年の12/31は休みにならない
+  const fixed: [number, number][] = [[1, 1], [7, 4], [12, 25], ...(y >= 2022 ? [[6, 19] as [number, number]] : [])];
+  for (const [fm, fd] of fixed) {
+    const fw = new Date(Date.UTC(y, fm - 1, fd)).getUTCDay();
+    if (fw === 6 && fm === 1) continue;
+    const obs = new Date(Date.UTC(y, fm - 1, fd + (fw === 6 ? -1 : fw === 0 ? 1 : 0)));
+    if (obs.getUTCMonth() + 1 === m && obs.getUTCDate() === d) return true;
+  }
+  if (m === 1 && d === nthWeekday(y, 1, 1, 3)) return true;
+  if (m === 2 && d === nthWeekday(y, 2, 1, 3)) return true;
+  if (m === 5 && d === nthWeekday(y, 5, 1, -1)) return true;
+  if (m === 9 && d === nthWeekday(y, 9, 1, 1)) return true;
+  if (m === 11 && d === nthWeekday(y, 11, 4, 4)) return true;
+  const [em, ed] = easter(y);
+  const gf = new Date(Date.UTC(y, em - 1, ed - 2));
+  return gf.getUTCMonth() + 1 === m && gf.getUTCDate() === d;
+}

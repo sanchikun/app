@@ -10,7 +10,7 @@ import { monthly, summarizeDays } from "./backtest";
 import type { BacktestResult, DayResult } from "./backtest";
 import { closePosition, newDay } from "./engine";
 import type { DailyBar } from "./gapstudy";
-import { cleanPrice, roundToTick, tickSize } from "./market";
+import { cleanPrice, roundToTick, tickSize, usMarketClosed } from "./market";
 import type { DayState, Settings, Trade } from "./types";
 
 /** その日ここまでの日足の値。prevClose は配当落ちを調整した前日終値 */
@@ -119,10 +119,13 @@ export function overnightExit(state: DayState, s: Settings, quotes: Record<strin
  * 大引けでの持ち越しの買い。場中（始値から終値）に overnightMinPct 以上上げた銘柄のうち、最も上げた
  * 1銘柄を終値で買う。損切りは置けない。実際には大引けの前に注文を出すので、判断はその時点の値になる。
  * overnightWeekdays があればその曜日の大引けだけで買い、overnightSymbols があればその銘柄だけを対象にする。
+ * overnightSkipUsHolidays なら、その夜に米国市場が開かない日は買わない。
  */
 export function overnightEntry(state: DayState, s: Settings, quotes: Record<string, OpenQuote>): void {
   if (state.position || state.halted) return;
   if (s.overnightWeekdays.length > 0 && !s.overnightWeekdays.includes(new Date(`${state.date}T00:00:00Z`).getUTCDay())) return;
+  // 日本の大引けのあとに開く米国市場は、同じ日付の取引日
+  if (s.overnightSkipUsHolidays && usMarketClosed(state.date)) return;
   const targets = overnightSymbols(s);
   const shares = s.overnightShares > 0 ? s.overnightShares : s.shares;
   const cap = s.overnightMaxPositionYen > 0 ? s.overnightMaxPositionYen : s.maxPositionYen;
