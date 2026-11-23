@@ -113,9 +113,11 @@ export async function paperTick(db: D1Database, provider: DataProvider, now: num
 }
 
 /** 1回の定期実行で株価を取りにいく銘柄数。Workers の外部リクエスト数の上限（無料プランは1回50）に収める */
-const FETCH_BATCH = 30;
+const FETCH_BATCH = 15;
+/** 安寄り買い: まだ1銘柄も寄り値が届いていないあいだに、様子見で取りにいく銘柄数。届き始めたら FETCH_BATCH ずつ取る */
+const PROBE_BATCH = 2;
 /** 安寄り買い: この時刻（JST、分）を過ぎたら、寄り値がそろっていなくても取れた銘柄で判断する。株価は約20分遅れで届く */
-const GAP_DECIDE_BY = 10 * 60;
+const GAP_DECIDE_BY = 10 * 60 + 15;
 /** 安寄り買い: この時刻（JST、分）を過ぎても1銘柄も寄り付いていなければ休場とみなし、株価を取りにいく回数を減らす */
 const QUIET_AFTER = 10 * 60;
 
@@ -186,9 +188,11 @@ async function dailyPaperTick(db: D1Database, provider: DataProvider, settings: 
     const gathered = (state.gathered ??= {});
     const waiting = () => settings.symbols.filter((sym) => !decided.includes(sym) && !(sym in gathered));
     const pool = waiting();
-    // 祝日は1銘柄も寄り付かない。QUIET_AFTER を過ぎても何も取れていない日は、1回に1銘柄だけ様子を見る
-    const quiet = jstMinutes(now) >= QUIET_AFTER && decided.length === 0 && Object.keys(gathered).length === 0;
-    const batch = quiet ? 1 : FETCH_BATCH;
+    // 株価は遅れて届くので、寄り付き後しばらくは何も取れない。1銘柄も届いていないあいだは少しだけ様子を見て、
+    // 届き始めてからまとめて取りにいく（1回の実行で使える CPU 時間に上限があり、取りにいく数だけ時間を使うため）。
+    // 祝日は1銘柄も寄り付かないので、QUIET_AFTER を過ぎたら1回に1銘柄だけにする
+    const nothingYet = decided.length === 0 && Object.keys(gathered).length === 0;
+    const batch = !nothingYet ? FETCH_BATCH : jstMinutes(now) >= QUIET_AFTER ? 1 : PROBE_BATCH;
     const start = pool.length > batch ? (state.fetchCursor ?? 0) % pool.length : 0;
     for (const sym of [...pool.slice(start), ...pool.slice(0, start)].slice(0, batch)) await fetchQuote(sym);
     if (pool.length > batch) state.fetchCursor = start + batch;

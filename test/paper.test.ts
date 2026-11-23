@@ -28,6 +28,54 @@ function fakeDb(settings: Settings) {
   return { db: db as unknown as D1Database, state: (d: string) => JSON.parse(days.get(d)!) as DayState, trades };
 }
 
+describe("ペーパートレード: 株価が届くまでは少しだけ様子を見て、届き始めてからまとめて取りにいく", () => {
+  const DATE = "2026-11-18";
+  const at = (hhmm: string) => jstTime(DATE, Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3)));
+  const symbols = Array.from({ length: 40 }, (_, i) => `${1000 + i}.T`);
+  const S: Settings = { ...DEFAULT_SETTINGS, enabled: true, strategy: "gapopen", symbols, fineTickSymbols: [], dailyLossLimitYen: 3000, gapMaxPositions: 2, gapPositionYen: 250000, maxPositionYen: 250000 };
+  it("届く前は2銘柄ずつ、届き始めたら15銘柄ずつ取り、全部そろってから一番安く寄った2銘柄を買う", async () => {
+    const calls: string[] = [];
+    // 9:20 から寄り値が届く。1039 と 1038 が一番安く寄る（最後に取りにいく銘柄）
+    const provider: DataProvider = {
+      async daily(symbol, _range, now) {
+        calls.push(symbol);
+        const k = Number(symbol.slice(0, 4)) - 1000, prev = 1000, open = 1000 - k;
+        const bars: DailyBar[] = [{ date: "2026-11-16", o: prev, h: prev, l: prev, c: prev }, { date: "2026-11-17", o: prev, h: prev, l: prev, c: prev }];
+        if (now >= at("09:20")) bars.push({ date: DATE, o: open, h: open, l: open, c: open });
+        return bars;
+      },
+      async intraday() { return []; },
+    };
+    const f = fakeDb(S);
+    const tick = async (hhmm: string) => { calls.length = 0; await paperTick(f.db, provider, at(hhmm)); return calls.length; };
+    expect(await tick("09:01")).toBe(2);
+    expect(await tick("09:10")).toBe(2);
+    // 9:20: まだ様子見の2銘柄。ここで寄り値が届く
+    expect(await tick("09:20")).toBe(2);
+    expect(f.state(DATE).position).toBeNull();
+    // 以降は15銘柄ずつ。残り38銘柄なので 15 + 15 + 8
+    expect(await tick("09:21")).toBe(15);
+    expect(f.state(DATE).position).toBeNull();
+    expect(await tick("09:22")).toBe(15);
+    expect(await tick("09:23")).toBe(8);
+    // 全部そろったので、ギャップの大きい順に 1039（-3.9%）と 1038（-3.8%）を買う
+    expect(f.state(DATE).position).toMatchObject({ symbol: "1039.T", entryPrice: 961 });
+    expect(f.state(DATE).more).toMatchObject([{ symbol: "1038.T", entryPrice: 962 }]);
+    expect(f.state(DATE).decided).toHaveLength(40);
+  });
+
+  it("祝日（1銘柄も届かない日）は、10:00 を過ぎたら1回に1銘柄だけ取りにいく", async () => {
+    const calls: string[] = [];
+    const provider: DataProvider = { async daily(symbol) { calls.push(symbol); return [{ date: "2026-11-17", o: 1000, h: 1000, l: 1000, c: 1000 }]; }, async intraday() { return []; } };
+    const f = fakeDb(S);
+    await paperTick(f.db, provider, at("09:30"));
+    expect(calls).toHaveLength(2);
+    calls.length = 0;
+    await paperTick(f.db, provider, at("10:30"));
+    expect(calls).toHaveLength(1);
+  });
+});
+
 describe("ペーパートレード: 安寄り買いを2銘柄、損切りは 9:05 から、10:00 に売る", () => {
   const DATE = "2026-11-18";
   const at = (hhmm: string) => jstTime(DATE, Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3)));
@@ -55,6 +103,9 @@ describe("ペーパートレード: 安寄り買いを2銘柄、損切りは 9:0
   it("寄りで2銘柄を買い、1銘柄は 9:10 の足で損切り、もう1銘柄は 10:00 の足の始値で売る", async () => {
     const f = fakeDb(S);
     // 9:03: 寄り値がそろったので、ギャップの大きい順に 1111（-3%）と 2222（-2%）を買う。3333（-0.5%）は見送り
+    // 最初の1回は様子見で2銘柄だけ取るので、3銘柄そろうのは次の回
+    await paperTick(f.db, provider, at("09:02"));
+    expect(f.state(DATE).position).toBeNull();
     await paperTick(f.db, provider, at("09:03"));
     expect(f.state(DATE).position).toMatchObject({ symbol: "1111.T", shares: 100, entryPrice: 1940, stop: 1930 });
     expect(f.state(DATE).more).toMatchObject([{ symbol: "2222.T", shares: 200, entryPrice: 980 }]);
