@@ -481,6 +481,33 @@ describe("上げた日の持ち越し", async () => {
     expect(normal.position?.symbol).toBe("1306.T");
   });
 
+  it("米国の翌日の逆張り: S&P500 が +1.5%以上の朝に寄りで買い、大引けで売る（別枠）", async () => {
+    const { usFadeTick, usReturnFor } = await import("../src/core/gapopen");
+    const F: Settings = { ...O, usFadeSymbol: "1357.T", usFadeMinPct: 1.5, usFadeShares: 100 };
+    const quotes = { "1357.T": q(3300, 3250, 3200, 3290) };
+    // 米国の前日比がまだ分からないあいだは判断しない
+    const wait = newDay("2026-11-18");
+    expect(usFadeTick(wait, F, quotes, undefined, false)).toHaveLength(0);
+    expect(wait.usFadeDecided).toBeUndefined();
+    // +1.6% なら寄り値で買い、ほかのポジションとは別に持ち、大引け後に終値で売る
+    const day = newDay("2026-11-18");
+    day.position = { symbol: "1111.T", side: "long", shares: 100, entryT: OPEN, entryPrice: 1970, stop: 1960, target: 197000 };
+    expect(dailyTick(day, F, quotes, OPEN, false, undefined, 1.6)).toHaveLength(0);
+    expect(day.usFade).toMatchObject({ symbol: "1357.T", shares: 100, entryPrice: 3250 });
+    expect(day.position?.symbol).toBe("1111.T");
+    expect(usFadeTick(day, F, quotes, 1.6, true)).toMatchObject([{ symbol: "1357.T", entryPrice: 3250, exitPrice: 3290, pnl: 4000, reason: "eod" }]);
+    expect(day.usFade).toBeUndefined();
+    expect(day.position?.symbol).toBe("1111.T");
+    // +1.4% の日と、米国が休みだった日（null）は買わない
+    for (const us of [1.4, null]) { const d = newDay("2026-11-18"); usFadeTick(d, F, quotes, us, false); expect(d.usFade).toBeUndefined(); expect(d.usFadeDecided).toBe(true); }
+    // 米国の足から前日比を出す。日本の前の営業日より前の米国市場しかなければ null
+    const us = [{ date: "2026-11-13", o: 1, h: 1, l: 1, c: 100 }, { date: "2026-11-16", o: 1, h: 1, l: 1, c: 102 }, { date: "2026-11-17", o: 1, h: 1, l: 1, c: 101 }];
+    expect(usReturnFor(us, "2026-11-17", "2026-11-16")).toBeCloseTo(2);
+    expect(usReturnFor(us, "2026-11-18", "2026-11-17")).toBeCloseTo(-0.98, 1);
+    expect(usReturnFor(us, "2026-11-19", "2026-11-18")).toBeNull();
+    expect(parseSettings({ usFadeSymbol: "1357" }, DEFAULT_SETTINGS).usFadeSymbol).toBe("1357.T");
+  });
+
   it("買付上限を超える銘柄は見送り、条件に合う銘柄がなければ買わない", () => {
     const capped = newDay("2026-11-18");
     dailyTick(capped, { ...O, overnightMaxPositionYen: 150000 }, { "1111.T": q(2000, 2000, 1995, 2050), "2222.T": q(1000, 1000, 1000, 1030) }, OPEN, true);

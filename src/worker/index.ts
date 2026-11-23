@@ -64,14 +64,14 @@ app.get("/api/status", async (c) => {
     tradeCount: day?.tradeCount ?? 0,
     halted: day?.halted ?? null,
     position: day?.position ?? null,
-    morePositions: day?.more ?? [],
+    morePositions: [...(day?.more ?? []), ...(day?.usFade ? [day.usFade] : [])],
     pending: day?.pending ?? null,
   });
 });
 
 app.get("/api/positions", async (c) => {
   const day = await getDay(c.env.DB, jstDate(Date.now() / 1000));
-  return c.json({ positions: [...(day?.position ? [day.position] : []), ...(day?.more ?? [])] });
+  return c.json({ positions: [...(day?.position ? [day.position] : []), ...(day?.more ?? []), ...(day?.usFade ? [day.usFade] : [])] });
 });
 
 app.get("/api/trades", async (c) => {

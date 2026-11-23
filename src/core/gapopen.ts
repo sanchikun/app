@@ -25,6 +25,17 @@ export interface OpenQuote {
   prevReturnPct?: number;
 }
 
+/**
+ * 日本の日付ごとに、その朝までに終わった直近の米国市場の前日比（%）を返す。米国の足は日付順。
+ * prevDate（日本の前の営業日）より前の米国市場しかないとき（米国が休みだった日）は、すでに前の日に織り込まれているので null。
+ */
+export function usReturnFor(us: DailyBar[], date: string, prevDate: string): number | null {
+  let i = us.length - 1;
+  while (i >= 0 && us[i].date >= date) i--;
+  if (i < 1 || us[i].date < prevDate || !(us[i - 1].c > 0)) return null;
+  return (us[i].c / us[i - 1].c - 1) * 100;
+}
+
 /** 持ち越しの対象銘柄。overnightSymbols が空なら symbols と同じ */
 export const overnightSymbols = (s: Settings) => (s.overnightSymbols.length > 0 ? s.overnightSymbols : s.symbols);
 
@@ -192,12 +203,41 @@ export function overnightEntry(state: DayState, s: Settings, quotes: Record<stri
 }
 
 /**
+ * 米国の翌日の逆張り。usReturnPct は、今日の寄り付き前に終わった直近の米国市場（S&P500）の前日比（%）。
+ * - 対象銘柄が寄り付いていて、まだ判断していなければ、usReturnPct が usFadeMinPct 以上なら寄り値で買う（寄成）。
+ *   usReturnPct が分からない（undefined）あいだは判断を待ち、大引け後まで分からなければ見送る。
+ * - 保有中なら、大引け後に終値で売る（引成）。損切りは置かない。
+ * 安寄り買いや持ち越しとは別枠（state.usFade）で持つ。
+ */
+export function usFadeTick(state: DayState, s: Settings, quotes: Record<string, OpenQuote>, usReturnPct: number | null | undefined, dayComplete: boolean): Trade[] {
+  if (!s.usFadeSymbol) return [];
+  const q = quotes[s.usFadeSymbol];
+  if (!state.usFadeDecided && q && (usReturnPct !== undefined || dayComplete)) {
+    state.usFadeDecided = true;
+    if (usReturnPct != null && usReturnPct >= s.usFadeMinPct && !state.halted) {
+      state.usFade = { symbol: s.usFadeSymbol, side: "long", shares: s.usFadeShares, entryT: jstTime(state.date, 9 * 60), entryPrice: q.open, stop: 0, target: cleanPrice(q.open * 100) };
+    }
+  }
+  if (state.usFade && q && dayComplete) {
+    // closePosition は state.position を決済するので、一時的に入れ替える
+    const keep = state.position;
+    state.position = state.usFade;
+    const trade = closePosition(state, s, jstTime(state.date, 15 * 60 + 30), q.close, "eod");
+    state.position = keep;
+    delete state.usFade;
+    return [trade];
+  }
+  return [];
+}
+
+/**
  * 日足で動かす戦略の1日分。持ち越しの決済 → 安寄り買い → 持ち越しの買い、の順に処理する。
  * 安寄り買いは 9:00〜15:30、持ち越しは 15:30〜翌 9:00 に持つので、両方を使っても同時に持つのは1ポジションまで。
  * dayComplete は大引け後で終値が確定していること。state を書き換え、決済された取引を返す。
  */
-export function dailyTick(state: DayState, s: Settings, quotes: Record<string, OpenQuote>, now: number, dayComplete: boolean, intraday?: Record<string, Bar[]>): Trade[] {
+export function dailyTick(state: DayState, s: Settings, quotes: Record<string, OpenQuote>, now: number, dayComplete: boolean, intraday?: Record<string, Bar[]>, usReturnPct?: number | null): Trade[] {
   const trades = overnightExit(state, s, quotes);
+  trades.push(...usFadeTick(state, s, quotes, usReturnPct, dayComplete));
   // 持ち越しがまだ寄り付いていない間は、安寄り買いの判断を待つ
   if (isCarried(state)) return trades;
   if (runsGapOpen(s)) trades.push(...gapOpenTick(state, s, quotes, now, dayComplete, intraday));
@@ -212,12 +252,13 @@ export function dailyTick(state: DayState, s: Settings, quotes: Record<string, O
  * 日足でのバックテスト（安寄り買い、持ち越し、その両方）。銘柄ごとの日足を日付でそろえ、1日ずつ dailyTick に流す。
  * 持ち越したポジションは、その銘柄の次の足が出た日の寄り付きで決済する。
  * 損切りした時刻は日足からは分からないので、取引の決済時刻は大引けにしてある。
+ * usReturns（日付 → その朝までに分かる S&P500 の前日比%）を渡すと、米国の翌日の逆張りも動かす。
  * gapExitAt（時刻を決めて売る）と gapStopFrom（損切りを遅らせる）は分足が要るので、ここでは使わない。
  * 持ち越した銘柄の翌営業日の足が壊れているときは、その取引を数えない。
  * 渡した銘柄はすべて対象にする。ただし overnightSymbols にだけある銘柄は、持ち越しだけの対象にする。
  */
-export function runGapOpenBacktest(data: [string, DailyBar[]][], settings: Settings): BacktestResult {
-  const onlyOvernight = (sym: string) => settings.overnightSymbols.includes(sym) && !settings.symbols.includes(sym);
+export function runGapOpenBacktest(data: [string, DailyBar[]][], settings: Settings, usReturns?: Map<string, number | null>): BacktestResult {
+  const onlyOvernight = (sym: string) => (settings.overnightSymbols.includes(sym) || sym === settings.usFadeSymbol) && !settings.symbols.includes(sym);
   const s: Settings = { ...settings, symbols: data.map(([sym]) => sym).filter((sym) => !onlyOvernight(sym)) };
   const index = data.map(([sym, bars]) => [sym, bars, new Map(bars.map((b, i) => [b.date, i]))] as const);
   const dates = [...new Set(data.flatMap(([, bars]) => bars.slice(1).map((b) => b.date)))].sort();
@@ -236,7 +277,7 @@ export function runGapOpenBacktest(data: [string, DailyBar[]][], settings: Setti
     if (held && !quotes[held] && index.some(([sym, , at]) => sym === held && at.has(date))) carried = null;
     const state = newDay(date);
     state.position = carried;
-    trades.push(...dailyTick(state, s, quotes, jstTime(date, 15 * 60 + 30), true));
+    trades.push(...dailyTick(state, s, quotes, jstTime(date, 15 * 60 + 30), true, undefined, usReturns ? (usReturns.get(date) ?? null) : undefined));
     carried = state.position;
     daily.push({ date, pnl: state.realizedPnl, trades: state.tradeCount, halted: state.halted });
   }

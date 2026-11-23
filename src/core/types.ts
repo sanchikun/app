@@ -74,6 +74,15 @@ export interface Settings {
   overnightMaxPositionYen: number;
   /** 持ち越し: 1回の株数（ETF は口数）。0 なら shares と同じ */
   overnightShares: number;
+  /**
+   * 米国の翌日の逆張り: 米国（S&P500）が前日に usFadeMinPct 以上上げた朝、この銘柄（日経ダブルインバースなど）を寄りで買い、
+   * 大引けで売る。損切りは置かない。空なら使わない。安寄り買い・持ち越しとは別枠で持つ
+   */
+  usFadeSymbol: string;
+  /** 米国の翌日の逆張り: 買うのに必要な S&P500 の前日比（%） */
+  usFadeMinPct: number;
+  /** 米国の翌日の逆張り: 株数（口数） */
+  usFadeShares: number;
   /** 持ち越し: 大引けで買う曜日（1 = 月曜 … 5 = 金曜）。空ならどの曜日でも買う */
   overnightWeekdays: number[];
   /** 持ち越し: 米国の株式市場が休みの日（その夜に米国市場が開かない日）の大引けでは買わない */
@@ -122,6 +131,9 @@ export const DEFAULT_SETTINGS: Settings = {
   gapStopFrom: "",
   gapPositionYen: 0,
   overnightShares: 0,
+  usFadeSymbol: "",
+  usFadeMinPct: 1.5,
+  usFadeShares: 100,
   overnightWeekdays: [],
   overnightSymbols: [],
   overnightSkipUsHolidays: false,
@@ -175,6 +187,12 @@ export interface DayState {
   decided?: string[];
   /** 持ち越しで、その日の大引けに買うかどうかを決め終えたか */
   overnightDecided?: boolean;
+  /** 米国の翌日の逆張りで保有中のポジション（position や more とは別枠） */
+  usFade?: Position;
+  /** 米国の翌日の逆張りで、その日に買うかどうかを決め終えたか */
+  usFadeDecided?: boolean;
+  /** 直近の米国市場（S&P500）の前日比（%）。その日に1回だけ取りにいく。取れなかった・古い（前の営業日より前の）ときは null */
+  usReturnPct?: number | null;
   /** 安寄り買い: 寄り値を取り終えたが、まだ入るかどうかを判断していない銘柄の値 */
   gathered?: Record<string, OpenQuote>;
   /** 安寄り買い: 次にどの銘柄から株価を取りにいくか */
@@ -233,6 +251,12 @@ export function parseSettings(input: unknown, base: Settings = DEFAULT_SETTINGS)
   num("overnightMinPct", -100, 20);
   num("overnightMaxPositionYen", 0, 1e9);
   num("overnightShares", 0, 100000, true);
+  num("usFadeMinPct", 0.1, 20);
+  num("usFadeShares", 1, 100000, true);
+  if ("usFadeSymbol" in src) {
+    if (typeof src.usFadeSymbol !== "string") throw new Error("usFadeSymbol must be a string");
+    out.usFadeSymbol = src.usFadeSymbol === "" ? "" : normalizeSymbol(src.usFadeSymbol);
+  }
   for (const key of ["gapExitAt", "gapStopFrom"] as const) {
     if (!(key in src)) continue;
     if (src[key] !== "" && !isHHMM(src[key])) throw new Error(`${key} must be "HH:MM" or ""`);

@@ -1,5 +1,5 @@
 import { closePosition, finishDay, newDay, processBar } from "../core/engine";
-import { closeGapPosition, dailyTick, gapPositions, usesIntradayExit, isDailyStrategy, jstTime, openQuote, overnightSymbols, runsGapOpen, runsOvernight } from "../core/gapopen";
+import { closeGapPosition, dailyTick, gapPositions, usReturnFor, usesIntradayExit, isDailyStrategy, jstTime, openQuote, overnightSymbols, runsGapOpen, runsOvernight } from "../core/gapopen";
 import type { OpenQuote } from "../core/gapopen";
 import { SESSION_CLOSE, inSession, jstDate, jstMinutes } from "../core/market";
 import { DEFAULT_SETTINGS, parseSettings } from "../core/types";
@@ -112,6 +112,8 @@ export async function paperTick(db: D1Database, provider: DataProvider, now: num
   return { date, processedBars: queue.length, trades, errors };
 }
 
+/** 米国の翌日の逆張りで見る指数（S&P500） */
+const US_INDEX = "^GSPC";
 /** 1回の定期実行で株価を取りにいく銘柄数。Workers の外部リクエスト数の上限（無料プランは1回50）に収める */
 const FETCH_BATCH = 15;
 /** 安寄り買い: まだ1銘柄も寄り値が届いていないあいだに、様子見で取りにいく銘柄数。届き始めたら FETCH_BATCH ずつ取る */
@@ -178,6 +180,19 @@ async function dailyPaperTick(db: D1Database, provider: DataProvider, settings: 
     }
   };
   for (const held of [state.position, ...(state.more ?? [])]) if (held) await fetchQuote(held.symbol);
+  // 米国の翌日の逆張り: 判断がまだか保有中なら対象銘柄の値を取り、S&P500 の前日比はその日に1回だけ取りにいく
+  if (settings.usFadeSymbol && (!state.usFadeDecided || state.usFade)) {
+    await fetchQuote(settings.usFadeSymbol);
+    if (state.usReturnPct === undefined && fetched[settings.usFadeSymbol]) {
+      try {
+        const jp = await provider.daily(settings.usFadeSymbol, "5d", now);
+        const i = jp.findIndex((b) => b.date === date);
+        state.usReturnPct = i >= 1 ? usReturnFor(await provider.daily(US_INDEX, "5d", now), date, jp[i - 1].date) : null;
+      } catch (e) {
+        errors.push(`${US_INDEX}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+  }
   if (runsOvernight(settings) && dayComplete && !state.overnightDecided) for (const sym of overnightSymbols(settings).slice(0, FETCH_BATCH)) await fetchQuote(sym);
 
   // 安寄り買い: 寄り値をまだ取れていない銘柄を、1回に FETCH_BATCH ずつ順に取りにいく。全銘柄がそろう（または
@@ -215,7 +230,7 @@ async function dailyPaperTick(db: D1Database, provider: DataProvider, settings: 
   }
 
   // 寄り値がそろうまでは安寄り買いの判断をさせない（保有中の銘柄の損切りと決済は動かす）
-  const trades = dailyTick(state, ready ? settings : { ...settings, symbols: [] }, quotes, now, dayComplete, intraday);
+  const trades = dailyTick(state, ready ? settings : { ...settings, symbols: [] }, quotes, now, dayComplete, intraday, state.usReturnPct);
   // 判断が済んだ銘柄の値は捨てる（持ち越しの決済待ちで判断が先送りになった銘柄は残す）
   for (const sym of Object.keys(state.gathered ?? {})) if (state.decided?.includes(sym)) delete state.gathered![sym];
   if (state.gathered && Object.keys(state.gathered).length === 0) delete state.gathered;

@@ -6,7 +6,8 @@
  */
 import { runBacktest } from "../src/core/backtest";
 import { DEFAULT_SETTINGS, normalizeSymbol, parseSettings } from "../src/core/types";
-import { runGapOpenBacktest } from "../src/core/gapopen";
+import { runGapOpenBacktest, usReturnFor } from "../src/core/gapopen";
+import { yahooDaily } from "../src/data/provider";
 import { getProvider } from "../src/data/provider";
 import type { Interval, Range } from "../src/data/provider";
 import { loadDaily, universe } from "./universe";
@@ -48,6 +49,9 @@ if (flag("gap-position-yen")) overrides.gapPositionYen = Number(flag("gap-positi
 if (flag("max-trades")) overrides.maxTradesPerDay = Number(flag("max-trades"));
 if (flag("gap-exit-at")) overrides.gapExitAt = flag("gap-exit-at");
 if (flag("gap-stop-from")) overrides.gapStopFrom = flag("gap-stop-from");
+if (flag("us-fade")) overrides.usFadeSymbol = flag("us-fade");
+if (flag("us-fade-min")) overrides.usFadeMinPct = Number(flag("us-fade-min"));
+if (flag("us-fade-shares")) overrides.usFadeShares = Number(flag("us-fade-shares"));
 if (flag("gap-prev-drop")) overrides.gapPrevDropPct = Number(flag("gap-prev-drop"));
 if (flag("overnight-weekdays")) overrides.overnightWeekdays = flag("overnight-weekdays")!.split(",").map(Number);
 if (flag("overnight-symbols")) overrides.overnightSymbols = flag("overnight-symbols")!.split(",");
@@ -60,9 +64,16 @@ if ((flag("strategy") ?? "") in DAILY) {
   if (!args.includes("--standard-tick")) overrides.fineTickSymbols = list;
   const s = { ...parseSettings(overrides, DEFAULT_SETTINGS), symbols: list };
   const range = flag("range") ?? "10y";
-  const data = await loadDaily([...new Set([...list, ...s.overnightSymbols])], range, flag("cache"));
+  const data = await loadDaily([...new Set([...list, ...s.overnightSymbols, ...(s.usFadeSymbol ? [s.usFadeSymbol] : [])])], range, flag("cache"));
+  // 米国の翌日の逆張り: S&P500 の日足から、日本の各営業日の朝までに分かる前日比を作る
+  let usReturns: Map<string, number | null> | undefined;
+  if (s.usFadeSymbol) {
+    const us = await yahooDaily("^GSPC", range);
+    const jp = data.find(([sym]) => sym === s.usFadeSymbol)?.[1] ?? [];
+    usReturns = new Map(jp.slice(1).map((b, i) => [b.date, usReturnFor(us, b.date, jp[i].date)]));
+  }
   if (s.gapExitAt || s.gapStopFrom) console.log("注意: gapExitAt（時刻を決めて売る）と gapStopFrom（損切りを遅らせる）は分足が要るので、この日足のバックテストには反映されません（引け売り・寄りから損切りで計算）。");
-  const result = runGapOpenBacktest(data, s);
+  const result = runGapOpenBacktest(data, s, usReturns);
   const m = result.summary;
   const rules = [
     ...(s.strategy !== "overnight" ? [`${s.gapPrevDropPct > 0 ? `前日${s.gapPrevDropPct}%以上下げ、` : ""}${s.gapMinPct}%以上安く寄ったら${s.gapMaxPositions > 1 ? `${s.gapMaxPositions}銘柄まで` : ""}${s.gapPositionYen > 0 ? `1銘柄${s.gapPositionYen}円分を` : ""}寄りで買い、${s.gapStopPct}%で損切り、引けで売り`] : []),
@@ -77,8 +88,13 @@ if ((flag("strategy") ?? "") in DAILY) {
       const loss = list.filter((x) => x.pnl < 0).reduce((a, x) => a - x.pnl, 0);
       console.log(`  ${label}  ${list.length}回  合計 ${yen(list.reduce((a, x) => a + x.pnl, 0))}  勝率 ${((win.length / Math.max(list.length, 1)) * 100).toFixed(1)}%  PF ${loss > 0 ? (win.reduce((a, x) => a + x.pnl, 0) / loss).toFixed(2) : "-"}`);
     };
-    part("安寄り買い", result.trades.filter((x) => x.reason !== "next_open"));
+    part("安寄り買い", result.trades.filter((x) => x.reason !== "next_open" && x.symbol !== s.usFadeSymbol));
     part("持ち越し　", result.trades.filter((x) => x.reason === "next_open"));
+  }
+  if (s.usFadeSymbol) {
+    const list = result.trades.filter((x) => x.symbol === s.usFadeSymbol && x.reason === "eod");
+    const win = list.filter((x) => x.pnl > 0), loss = list.filter((x) => x.pnl < 0).reduce((a, x) => a - x.pnl, 0);
+    console.log(`  米国の翌日の逆張り（${s.usFadeSymbol}、S&P500 が +${s.usFadeMinPct}%以上の翌日）  ${list.length}回  合計 ${yen(list.reduce((a, x) => a + x.pnl, 0))}  勝率 ${((win.length / Math.max(list.length, 1)) * 100).toFixed(1)}%  PF ${loss > 0 ? (win.reduce((a, x) => a + x.pnl, 0) / loss).toFixed(2) : "-"}  最悪 ${yen(Math.min(0, ...list.map((x) => x.pnl)))}`);
   }
   const plus = result.monthly.filter((x) => x.pnl > 0).length;
   const worstMonth = Math.min(...result.monthly.map((x) => x.pnl));
