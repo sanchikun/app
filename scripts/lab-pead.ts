@@ -2,12 +2,15 @@
  * 決算のあとの値動きは続くか。引け後に決算短信が出た翌朝のギャップで分け、その日の寄り／引けで買って
  * 数日持ったときの成績（相場平均に対する上乗せ）を見る。J-Quants の開示日（2024年9月〜2026年8月）。
  *   npx tsx scripts/lab-pead.ts
+ *   npx tsx scripts/lab-pead.ts --dir .cachet   # 別の銘柄群（lab-jquants-fins.ts --dir .cachet で開示日を取ってから）
  */
 import { existsSync, readFileSync } from "node:fs";
-import { CACHE, ETFS, build, f, hold, mean, stat } from "./lab";
+import { CACHE as DEFAULT_DIR, ETFS, build, f, hold, mean, stat } from "./lab";
 import type { Rec } from "./lab";
 
-const u = build((s) => !ETFS.includes(s));
+const di = process.argv.indexOf("--dir");
+const CACHE = di >= 0 ? process.argv[di + 1] : DEFAULT_DIR;
+const u = build((s) => !ETFS.includes(s), CACHE);
 interface Disc { d: string; t: string; type: string }
 const fins = new Map<string, Disc[]>();
 for (const s of new Set(u.recs.map((r) => r.s))) { const file = `${CACHE}/jq-fins-${s.slice(0, 4)}.json`; if (existsSync(file)) fins.set(s, (JSON.parse(readFileSync(file, "utf8")) as Disc[]).filter((x) => x.type.includes("FinancialStatements"))); }
